@@ -105,9 +105,12 @@ public class PredictionController : ControllerBase
     /// Evaluates what the model would have predicted on a specific historical date (Point-in-Time Prediction)
     /// and compares it with the actual forward market outcome (3d, 7d, 14d returns).
     /// </summary>
+    /// <param name="date">Historical date to evaluate.</param>
+    /// <param name="strictlyOutOfSample">If true, trains a dedicated model strictly on data prior to this date, guaranteeing zero future leakage.</param>
     [HttpGet("historical")]
     public async Task<IActionResult> GetHistoricalDatePrediction(
         [FromQuery] DateOnly date,
+        [FromQuery] bool strictlyOutOfSample = true,
         CancellationToken ct = default)
     {
         var marketData = _storage.Exists()
@@ -128,17 +131,37 @@ public class PredictionController : ControllerBase
             return NotFound($"No features calculated for date {date}.");
         }
 
-        // Ensure model is trained
-        if (!_predictor.IsTrained)
+        IPredictorService predictorToUse = _predictor;
+        int trainingSamplesUsed = 0;
+
+        if (strictlyOutOfSample)
+        {
+            // Strictly Out-of-Sample: The model trains ONLY on data that occurred BEFORE this date (with 7-day lookahead buffer)
+            var cutoffDate = date.AddDays(-7);
+            var historicalOnlyMarket = sortedMarket.Where(d => d.Date <= cutoffDate).ToList();
+            var historicalOnlyFeatures = features.Where(f => f.Date <= cutoffDate).ToList();
+
+            var trainingDataset = _turningPointDetector.BuildTrainingDataset(historicalOnlyMarket, historicalOnlyFeatures, lookaheadDays: 7);
+            trainingSamplesUsed = trainingDataset.Count;
+
+            var pointInTimePredictor = new PredictorService();
+            if (trainingDataset.Count >= 10)
+            {
+                pointInTimePredictor.TrainModel(trainingDataset);
+            }
+            predictorToUse = pointInTimePredictor;
+        }
+        else if (!_predictor.IsTrained)
         {
             var trainingDataset = _turningPointDetector.BuildTrainingDataset(sortedMarket, features, lookaheadDays: 7);
+            trainingSamplesUsed = trainingDataset.Count;
             if (trainingDataset.Count >= 10)
             {
                 _predictor.TrainModel(trainingDataset);
             }
         }
 
-        var prediction = _predictor.Predict(targetFeatures, targetMarket);
+        var prediction = predictorToUse.Predict(targetFeatures, targetMarket);
         var labels = _turningPointDetector.DetectTurningPoints(sortedMarket);
         var targetLabel = labels.FirstOrDefault(l => l.Date == date);
 
@@ -146,6 +169,8 @@ public class PredictionController : ControllerBase
         {
             Date = date,
             BtcClose = targetMarket.BtcClose,
+            StrictlyOutOfSample = strictlyOutOfSample,
+            TrainingSamplesUsed = trainingSamplesUsed,
             Prediction = prediction,
             ActualHistoricalOutcome = new
             {
