@@ -1,6 +1,8 @@
+using CryptoPredictor.Backtest;
 using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
+using CryptoPredictor.Prediction;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +20,9 @@ builder.Services.AddHttpClient<IDeribitDataService, DeribitDataService>();
 builder.Services.AddSingleton<IMarketDataStorage, JsonMarketDataStorage>();
 builder.Services.AddScoped<IMarketDataAggregator, MarketDataAggregator>();
 builder.Services.AddSingleton<IFeatureCalculator, FeatureCalculator>();
+builder.Services.AddSingleton<ITurningPointDetector, TurningPointDetector>();
+builder.Services.AddSingleton<IPredictorService, PredictorService>();
+builder.Services.AddSingleton<IBacktestEngine, BacktestEngine>();
 
 var app = builder.Build();
 
