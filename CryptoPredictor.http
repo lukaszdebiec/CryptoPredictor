@@ -1,0 +1,6 @@
+@CryptoPredictor_HostAddress = http://localhost:5078
+
+GET {{CryptoPredictor_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
