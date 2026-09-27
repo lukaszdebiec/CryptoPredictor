@@ -6,6 +6,9 @@
 # dotenv files
 .env
 
+# Local data cache
+Data/storage/*.json
+
 # User-specific files
 *.rsuser
 *.suo
