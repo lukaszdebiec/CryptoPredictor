@@ -56,25 +56,36 @@ public class MarketDataController : ControllerBase
     /// <summary>
     /// Retrieves cached historical daily market data.
     /// </summary>
+    /// <param name="days">Optional number of recent days to return (e.g. 7, 30). Leave empty to get full history.</param>
     [HttpGet("history")]
-    public async Task<ActionResult<IReadOnlyList<DailyMarketData>>> GetMarketDataHistory(CancellationToken ct = default)
+    public async Task<ActionResult<IReadOnlyList<DailyMarketData>>> GetMarketDataHistory([FromQuery] int? days = null, CancellationToken ct = default)
     {
+        IReadOnlyList<DailyMarketData> data;
+
         if (!_storage.Exists())
         {
             // Auto-fetch if not cached yet
-            var freshData = await _aggregator.FetchAndAggregateAsync(180, saveToStorage: true, ct);
-            return Ok(freshData);
+            data = await _aggregator.FetchAndAggregateAsync(180, saveToStorage: true, ct);
+        }
+        else
+        {
+            data = await _storage.LoadAsync(ct);
         }
 
-        var cached = await _storage.LoadAsync(ct);
-        return Ok(cached);
+        if (days.HasValue && days.Value > 0)
+        {
+            return Ok(data.TakeLast(days.Value).ToList());
+        }
+
+        return Ok(data);
     }
 
     /// <summary>
     /// Fetches/loads real market data and runs it through the quantitative Feature Calculator, returning real calculated features.
     /// </summary>
+    /// <param name="days">Optional number of recent days to return (e.g. 7, 30). Leave empty to get full history.</param>
     [HttpGet("features")]
-    public async Task<ActionResult<IReadOnlyList<DailyFeatures>>> GetCalculatedFeatures(CancellationToken ct = default)
+    public async Task<ActionResult<IReadOnlyList<DailyFeatures>>> GetCalculatedFeatures([FromQuery] int? days = null, CancellationToken ct = default)
     {
         IReadOnlyList<DailyMarketData> marketData;
 
@@ -88,6 +99,13 @@ public class MarketDataController : ControllerBase
         }
 
         var features = _featureCalculator.Calculate(marketData);
+
+        if (days.HasValue && days.Value > 0)
+        {
+            return Ok(features.TakeLast(days.Value).ToList());
+        }
+
         return Ok(features);
     }
 }
+
