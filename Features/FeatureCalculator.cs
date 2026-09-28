@@ -25,6 +25,13 @@ public class FeatureCalculator : IFeatureCalculator
             dailyReturns[i] = prevClose > 0 ? (sorted[i].BtcClose - prevClose) / prevClose : 0m;
         }
 
+        // Precompute rolling 7-day ETF flows to calculate a smooth, weekend-neutral institutional flow Z-Score
+        var etfFlows7d = new decimal[sorted.Count];
+        for (int j = 0; j < sorted.Count; j++)
+        {
+            etfFlows7d[j] = GetRollingSum(sorted, j, 7, d => d.BitcoinEtfNetFlowUsd);
+        }
+
         decimal allTimeHigh = 0m;
 
         for (int i = 0; i < sorted.Count; i++)
@@ -70,10 +77,10 @@ public class FeatureCalculator : IFeatureCalculator
             // 7. Liquidations Z-Score
             var liqZ30d = CalculateRollingZScore(sorted, i, 30, d => d.LongLiquidationsUsd + d.ShortLiquidationsUsd);
 
-            // 8. ETF Flows
-            var etfFlow7d = GetRollingSum(sorted, i, 7, d => d.BitcoinEtfNetFlowUsd);
+            // 8. ETF Flows (7-day cumulative window eliminates 5/7 TradFi weekend zero-distortion)
+            var etfFlow7d = etfFlows7d[i];
             var etfFlow30d = GetRollingSum(sorted, i, 30, d => d.BitcoinEtfNetFlowUsd);
-            var etfFlowZ30d = CalculateRollingZScore(sorted, i, 30, d => d.BitcoinEtfNetFlowUsd);
+            var etfFlowZ30d = CalculateRollingZScore(etfFlows7d, i, 30);
 
             // 9. Options DVOL & Skew Z-Scores
             var dvolZ30d = CalculateRollingZScore(sorted, i, 30, d => d.BtcDvol);
@@ -212,6 +219,38 @@ public class FeatureCalculator : IFeatureCalculator
 
         var currentVal = selector(list[currentIndex]);
         return (decimal)(((double)currentVal - (double)mean) / stdDev);
+    }
+
+    private static decimal CalculateRollingZScore(decimal[] array, int currentIndex, int windowSize)
+    {
+        var startIndex = Math.Max(0, currentIndex - windowSize + 1);
+        int count = currentIndex - startIndex + 1;
+
+        if (count < 2)
+            return 0m;
+
+        decimal sum = 0m;
+        for (int i = startIndex; i <= currentIndex; i++)
+        {
+            sum += array[i];
+        }
+
+        decimal mean = sum / count;
+
+        double sumSquaredDiff = 0.0;
+        for (int i = startIndex; i <= currentIndex; i++)
+        {
+            double diff = (double)(array[i] - mean);
+            sumSquaredDiff += diff * diff;
+        }
+
+        double sampleVariance = sumSquaredDiff / (count - 1);
+        double stdDev = Math.Sqrt(sampleVariance);
+
+        if (stdDev <= 1e-12)
+            return 0m;
+
+        return (decimal)(((double)array[currentIndex] - (double)mean) / stdDev);
     }
 
     private static decimal CalculateAnnualizedRealizedVolatility(decimal[] dailyReturns, int currentIndex, int windowSize)
