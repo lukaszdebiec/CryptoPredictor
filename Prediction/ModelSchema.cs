@@ -25,6 +25,8 @@ public class ModelInput
     public float FundingZScore90d { get; set; }
 
     public float DvolZScore30d { get; set; }
+    public float EtfFlow7d { get; set; }
+    public float EtfFlowZScore30d { get; set; }
 
     public float FearGreedIndex { get; set; }
     public float CoinbasePremium { get; set; }

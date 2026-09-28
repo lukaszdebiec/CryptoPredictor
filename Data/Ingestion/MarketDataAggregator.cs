@@ -8,6 +8,7 @@ public class MarketDataAggregator : IMarketDataAggregator
     private readonly ISentimentDataService _sentimentDataService;
     private readonly ICoinbaseDataService _coinbaseDataService;
     private readonly IDeribitDataService _deribitDataService;
+    private readonly IEtfDataService _etfDataService;
     private readonly IMarketDataStorage _storage;
     private readonly ILogger<MarketDataAggregator> _logger;
 
@@ -16,6 +17,7 @@ public class MarketDataAggregator : IMarketDataAggregator
         ISentimentDataService sentimentDataService,
         ICoinbaseDataService coinbaseDataService,
         IDeribitDataService deribitDataService,
+        IEtfDataService etfDataService,
         IMarketDataStorage storage,
         ILogger<MarketDataAggregator> logger)
     {
@@ -23,6 +25,7 @@ public class MarketDataAggregator : IMarketDataAggregator
         _sentimentDataService = sentimentDataService;
         _coinbaseDataService = coinbaseDataService;
         _deribitDataService = deribitDataService;
+        _etfDataService = etfDataService;
         _storage = storage;
         _logger = logger;
     }
@@ -41,8 +44,9 @@ public class MarketDataAggregator : IMarketDataAggregator
         var fngTask = _sentimentDataService.GetFearAndGreedHistoryAsync(limit: days + 35, ct);
         var coinbaseTask = _coinbaseDataService.GetDailyClosePricesAsync(ct);
         var dvolTask = _deribitDataService.GetDailyDvolHistoryAsync(startDate, endDate, ct);
+        var etfTask = _etfDataService.GetDailyEtfNetFlowsAsync(ct);
 
-        await Task.WhenAll(klinesTask, fundingTask, oiTask, fngTask, coinbaseTask, dvolTask);
+        await Task.WhenAll(klinesTask, fundingTask, oiTask, fngTask, coinbaseTask, dvolTask, etfTask);
 
         var klines = await klinesTask;
         var fundingMap = await fundingTask;
@@ -50,9 +54,10 @@ public class MarketDataAggregator : IMarketDataAggregator
         var fngMap = await fngTask;
         var coinbaseMap = await coinbaseTask;
         var dvolMap = await dvolTask;
+        var etfMap = await etfTask;
 
-        _logger.LogInformation("Fetched {KlinesCount} candles from Binance, {FundingCount} funding dates, {OiCount} OI dates, {FngCount} F&G dates.",
-            klines.Count, fundingMap.Count, oiMap.Count, fngMap.Count);
+        _logger.LogInformation("Fetched {KlinesCount} candles, {FundingCount} funding dates, {OiCount} OI dates, {FngCount} F&G dates, {EtfCount} ETF flow dates.",
+            klines.Count, fundingMap.Count, oiMap.Count, fngMap.Count, etfMap.Count);
 
         var aggregated = new List<DailyMarketData>();
 
@@ -65,6 +70,7 @@ public class MarketDataAggregator : IMarketDataAggregator
             fngMap.TryGetValue(date, out var fearGreed);
             coinbaseMap.TryGetValue(date, out var coinbaseClose);
             dvolMap.TryGetValue(date, out var dvol);
+            etfMap.TryGetValue(date, out var etfFlow);
 
             decimal coinbasePremium = 0m;
             if (coinbaseClose > 0m && kline.Close > 0m)
@@ -84,7 +90,8 @@ public class MarketDataAggregator : IMarketDataAggregator
                 FundingRate = fundingRate,
                 CoinbasePremium = coinbasePremium,
                 BtcDvol = dvol,
-                FearGreedIndex = fearGreed > 0 ? fearGreed : 50
+                FearGreedIndex = fearGreed > 0 ? fearGreed : 50,
+                BitcoinEtfNetFlowUsd = etfFlow
             });
         }
 

@@ -16,6 +16,7 @@ builder.Services.AddHttpClient<IBinanceDataService, BinanceDataService>();
 builder.Services.AddHttpClient<ISentimentDataService, SentimentDataService>();
 builder.Services.AddHttpClient<ICoinbaseDataService, CoinbaseDataService>();
 builder.Services.AddHttpClient<IDeribitDataService, DeribitDataService>();
+builder.Services.AddHttpClient<IEtfDataService, FarsideEtfService>();
 
 builder.Services.AddSingleton<IMarketDataStorage, JsonMarketDataStorage>();
 builder.Services.AddScoped<IMarketDataAggregator, MarketDataAggregator>();

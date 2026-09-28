@@ -9,6 +9,7 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 ## 🏗️ Architektura i Aktualne Funkcjonalności
 
 - **Pobieranie i agregacja danych (`Data/Ingestion`):**
+  - **Farside Investors:** Oficjalne raporty napływów/odpływów netto funduszy Spot BTC ETF (IBIT, FBTC, BITB, GBTC itd.) z automatycznym omijaniem filtrów Cloudflare i lokalnym cache.
   - **Binance Spot:** Świece dzienne OHLCV dla BTC/USDT.
   - **Binance Futures:** Dobowa historia Funding Rate oraz Open Interest (USD).
   - **Alternative.me:** Indeks Fear & Greed.
@@ -16,6 +17,7 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
   - **Deribit:** Indeks implikowanej zmienności opcji (*BTC DVOL*).
   - *Wszystkie źródła są w 100% darmowe i nie wymagają płatnych kluczy API.*
 - **Silnik Inżynierii Cech (`Features/FeatureCalculator.cs`):**
+  - Płynność instytucjonalna ETF (`EtfFlow7d`, `EtfFlow30d` oraz znormalizowany Z-Score `EtfFlowZScore30d`).
   - Stacjonarne wskaźniki Z-Score (30d i 90d dla Fundingu, OI, DVOL).
   - Zannualizowana zrealizowana zmienność (`Realized Volatility` 7d i 30d).
   - Stopy zwrotu (1d, 3d, 7d, 30d) i obsunięcia cenowe (Drawdowny od 30d high, 90d high i ATH).
@@ -35,9 +37,12 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 
 ## 🗺️ ROADMAP
 
-### Priorytet 1: Uzupełnienie danych ETF (Darmowy Scraper Farside)
-- [ ] Stworzenie scrapera do publicznie publikowanych raportów dziennych napływów netto [Farside Investors](https://farside.co.uk/btc/).
-- [ ] Aktywacja i przeliczanie cech `EtfFlow7d`, `EtfFlow30d` oraz `EtfFlowZScore30d` w kalkulatorze cech.
+### Priorytet 1: Uzupełnienie danych ETF (Darmowy Scraper Farside) ✅
+- [x] Stworzenie dedykowanego serwisu `FarsideEtfService` zasilającego historię od 11 stycznia 2024 roku z archiwum Farside Investors.
+- [x] Ominięcie blokady Cloudflare TLS/WAF oraz wdrożenie lokalnego bufora w `etf_flows.json`.
+- [x] Wpięcie do `MarketDataAggregator` i zasilenie `BitcoinEtfNetFlowUsd`.
+- [x] Aktywacja cech `EtfFlow7d`, `EtfFlow30d` i `EtfFlowZScore30d` w modelu FastTree (GBDT) oraz interpretacji `KeyDrivers`.
+
 
 ### Priorytet 2: Migracja Storage z JSON do SQLite (EF Core)
 - [ ] Zastąpienie pliku cache `market_data.json` lekką, plikową bazą danych **SQLite** za pomocą Entity Framework Core (`Microsoft.EntityFrameworkCore.Sqlite`).

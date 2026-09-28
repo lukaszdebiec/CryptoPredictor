@@ -38,6 +38,8 @@ public class PredictorService : IPredictorService
             FundingZScore30d = (float)s.Features.FundingZScore30d,
             FundingZScore90d = (float)s.Features.FundingZScore90d,
             DvolZScore30d = (float)s.Features.DvolZScore30d,
+            EtfFlow7d = (float)(s.Features.EtfFlow7d / 1_000_000m), // in millions USD
+            EtfFlowZScore30d = (float)s.Features.EtfFlowZScore30d,
             FearGreedIndex = s.Label.IsLocalBottom ? 20f : 50f,
             CoinbasePremium = 0f,
             Label = s.Label.IsForward7dBullish ?? (s.Label.ForwardReturn7d > 0.02m)
@@ -61,7 +63,9 @@ public class PredictorService : IPredictorService
             nameof(ModelInput.OiZScore30d),
             nameof(ModelInput.FundingZScore30d),
             nameof(ModelInput.FundingZScore90d),
-            nameof(ModelInput.DvolZScore30d)
+            nameof(ModelInput.DvolZScore30d),
+            nameof(ModelInput.EtfFlow7d),
+            nameof(ModelInput.EtfFlowZScore30d)
         };
 
         // Train / test split (80% train, 20% test)
@@ -124,6 +128,8 @@ public class PredictorService : IPredictorService
                     FundingZScore30d = (float)todayFeatures.FundingZScore30d,
                     FundingZScore90d = (float)todayFeatures.FundingZScore90d,
                     DvolZScore30d = (float)todayFeatures.DvolZScore30d,
+                    EtfFlow7d = (float)(todayFeatures.EtfFlow7d / 1_000_000m),
+                    EtfFlowZScore30d = (float)todayFeatures.EtfFlowZScore30d,
                     FearGreedIndex = todayMarket.FearGreedIndex,
                     CoinbasePremium = (float)todayMarket.CoinbasePremium
                 };
@@ -151,6 +157,16 @@ public class PredictorService : IPredictorService
 
         if (todayFeatures.DvolZScore30d < -1.0m)
             drivers.Add($"Implied Volatility (DVOL) is compressed (Z-Score: {todayFeatures.DvolZScore30d:F2}), typically preceding a major expansion.");
+
+        if (todayFeatures.EtfFlowZScore30d > 1.2m)
+            drivers.Add($"Institutional ETF Inflows are exceptionally high (Z-Score: {todayFeatures.EtfFlowZScore30d:F2}), providing strong Wall Street spot support.");
+        else if (todayFeatures.EtfFlowZScore30d < -1.2m)
+            drivers.Add($"Institutional ETF Outflows are elevated (Z-Score: {todayFeatures.EtfFlowZScore30d:F2}), indicating institutional de-risking.");
+
+        if (todayFeatures.EtfFlow7d > 300_000_000m)
+            drivers.Add($"Net 7-day Spot ETF inflows reached +${todayFeatures.EtfFlow7d / 1_000_000m:F1}M, providing persistent spot liquidity.");
+        else if (todayFeatures.EtfFlow7d < -300_000_000m)
+            drivers.Add($"Net 7-day Spot ETF outflows reached -${Math.Abs(todayFeatures.EtfFlow7d / 1_000_000m):F1}M, adding supply overhang.");
 
         if (todayFeatures.BtcDrawdownFrom30dHigh < -0.08m)
             drivers.Add($"BTC has experienced significant 30-day drawdown ({todayFeatures.BtcDrawdownFrom30dHigh:P1}).");
@@ -212,10 +228,18 @@ public class PredictorService : IPredictorService
         // Low DVOL before expansion
         if (feat.DvolZScore30d < -1.0m) score += 0.05f;
 
+        // Institutional ETF flows
+        if (feat.EtfFlowZScore30d > 1.2m) score += 0.08f;
+        else if (feat.EtfFlowZScore30d < -1.2m) score -= 0.08f;
+
+        if (feat.EtfFlow7d > 300_000_000m) score += 0.05f;
+        else if (feat.EtfFlow7d < -300_000_000m) score -= 0.05f;
+
         // Extreme fear
         if (market.FearGreedIndex < 25) score += 0.10f;
         else if (market.FearGreedIndex > 75) score -= 0.10f;
 
         return Math.Clamp(score, 0.05f, 0.95f);
+
     }
 }
