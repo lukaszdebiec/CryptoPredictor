@@ -6,8 +6,11 @@
 # dotenv files
 .env
 
-# Local data cache
+# Local data cache & SQLite database
 Data/storage/*.json
+Data/storage/*.db
+Data/storage/*.db-shm
+Data/storage/*.db-wal
 
 # User-specific files
 *.rsuser

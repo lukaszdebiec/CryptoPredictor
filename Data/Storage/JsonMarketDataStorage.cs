@@ -38,4 +38,14 @@ public class JsonMarketDataStorage : IMarketDataStorage
         var list = await JsonSerializer.DeserializeAsync<List<DailyMarketData>>(stream, JsonOptions, ct);
         return list ?? (IReadOnlyList<DailyMarketData>)Array.Empty<DailyMarketData>();
     }
+
+    public async Task<IReadOnlyList<DailyMarketData>> LoadRecentAsync(int days, CancellationToken ct = default)
+    {
+        var all = await LoadAsync(ct);
+        if (days <= 0 || all.Count <= days)
+            return all;
+
+        return all.TakeLast(days).ToList();
+    }
 }
+

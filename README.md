@@ -44,9 +44,12 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] Aktywacja cech `EtfFlow7d`, `EtfFlow30d` i `EtfFlowZScore30d` w modelu FastTree (GBDT) oraz interpretacji `KeyDrivers`.
 
 
-### Priorytet 2: Migracja Storage z JSON do SQLite (EF Core)
-- [ ] Zastąpienie pliku cache `market_data.json` lekką, plikową bazą danych **SQLite** za pomocą Entity Framework Core (`Microsoft.EntityFrameworkCore.Sqlite`).
-- [ ] Zapewnienie indeksowania po dacie, transakcyjności oraz szybkiego dopisywania pojedynczych dni bez konieczności przepisywania całego pliku.
+### Priorytet 2: Migracja Storage z JSON do SQLite (EF Core) ✅
+- [x] Wdrożenie Entity Framework Core z dostawcą SQLite (`Microsoft.EntityFrameworkCore.Sqlite`).
+- [x] Stworzenie `CryptoPredictorDbContext` oraz serwisu `SqliteMarketDataStorage` z atomowym Upsertem (AddOrUpdate).
+- [x] Automatyczna, bezstratna migracja: przy starcie dotychczasowe rekordy z `market_data.json` są samoczynnie importowane do `market_data.db`.
+- [x] Zoptymalizowane zapytania `LoadRecentAsync(days)` z natywnym `LIMIT` i indeksem po dacie.
+
 
 ### Priorytet 3: Automatyczny Background Worker (Harmonogram 00:05 UTC)
 - [ ] Wdrożenie `IHostedService` / `BackgroundService` w .NET.

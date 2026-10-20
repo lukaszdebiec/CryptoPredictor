@@ -69,15 +69,13 @@ public class MarketDataController : ControllerBase
         }
         else
         {
-            data = await _storage.LoadAsync(ct);
-        }
-
-        if (days.HasValue && days.Value > 0)
-        {
-            return Ok(data.TakeLast(days.Value).ToList());
+            data = days.HasValue && days.Value > 0
+                ? await _storage.LoadRecentAsync(days.Value, ct)
+                : await _storage.LoadAsync(ct);
         }
 
         return Ok(data);
+
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
 using CryptoPredictor.Prediction;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,7 +19,19 @@ builder.Services.AddHttpClient<ICoinbaseDataService, CoinbaseDataService>();
 builder.Services.AddHttpClient<IDeribitDataService, DeribitDataService>();
 builder.Services.AddHttpClient<IEtfDataService, FarsideEtfService>();
 
-builder.Services.AddSingleton<IMarketDataStorage, JsonMarketDataStorage>();
+// SQLite Database configuration
+var storageDir = Path.Combine(builder.Environment.ContentRootPath, "Data", "storage");
+if (!Directory.Exists(storageDir))
+{
+    Directory.CreateDirectory(storageDir);
+}
+var dbPath = Path.Combine(storageDir, "market_data.db");
+builder.Services.AddDbContextFactory<CryptoPredictorDbContext>(options =>
+{
+    options.UseSqlite($"Data Source={dbPath}");
+});
+
+builder.Services.AddSingleton<IMarketDataStorage, SqliteMarketDataStorage>();
 builder.Services.AddScoped<IMarketDataAggregator, MarketDataAggregator>();
 builder.Services.AddSingleton<IFeatureCalculator, FeatureCalculator>();
 builder.Services.AddSingleton<ITurningPointDetector, TurningPointDetector>();
@@ -26,6 +39,13 @@ builder.Services.AddSingleton<IPredictorService, PredictorService>();
 builder.Services.AddSingleton<IBacktestEngine, BacktestEngine>();
 
 var app = builder.Build();
+
+// Ensure SQLite database is created and auto-migrated from legacy JSON if available
+using (var scope = app.Services.CreateScope())
+{
+    var storage = scope.ServiceProvider.GetRequiredService<IMarketDataStorage>();
+    await storage.LoadRecentAsync(1);
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -45,3 +65,4 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
