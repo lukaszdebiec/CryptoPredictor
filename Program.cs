@@ -60,11 +60,15 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "CryptoPredictor API v1");
-        c.RoutePrefix = string.Empty; // Serwuj Swagger UI bezposrednio pod glownym adresem '/'
+        c.RoutePrefix = "swagger"; // Dostępny pod adresem /swagger
     });
 }
 
 app.UseHttpsRedirection();
+
+// Enable serving lightweight frontend dashboard from wwwroot
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.UseAuthorization();
 

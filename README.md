@@ -65,9 +65,19 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] Dedykowany kontroler `AlertsController` (`/api/alerts/status`, `/api/alerts/test`, `/api/alerts/send-today`) ułatwiający weryfikację i ręczne testowanie bota z poziomu Swagger UI.
 - [x] Bezpieczny fallback – brak uzupełnionego tokenu nie zatrzymuje działania aplikacji ani cyklu dobowego.
 
-### Priorytet 5: Interaktywny Dashboard z Wykresem (TradingView Lightweight Charts)
-- [ ] Prosty, nowoczesny panel frontendowy serwowany z aplikacji.
-- [ ] Wykres świecowy BTC z naniesionymi punktami zwrotnymi (znaczniki dołków i szczytów) oraz wskaźnikiem Z-Score fundingu pod wykresem.
+### Priorytet 5: Interaktywny Dashboard z Wykresem (TradingView Lightweight Charts) ✅
+- [x] Nowoczesny panel frontendowy serwowany bezpośrednio z Kestrel (`wwwroot`) jako pojedynczy, lekki kontener bez zbędnego narzutu i bez problemów z CORS.
+- [x] Pełna integracja z biblioteką **TradingView Lightweight Charts v5.2.1** (renderowanie na Canvas, płynne 60 FPS, gesty, celownik).
+- [x] Interaktywny wykres świecowy BTC/USDT z automatycznie naniesionymi algorytmicznymi znacznikami punktów zwrotnych (zielone strzałki na lokalnych dołkach, czerwone strzałki na lokalnych szczytach).
+- [x] Zsynchronizowany dolny wykres wskaźników z przełączanymi zakładkami: **Funding Rate Z-Score** (z poziomami wykupienia/wyprzedania), **Przepływy ETF** (zielone/czerwone słupki w mln USD) oraz **Fear & Greed Index**.
+- [x] Karty metryk na żywo: predykcja ML (FastTree), prawdopodobieństwo wzrostu, reżim rynku, cena BTC, sentyment, dźwignia oraz kluczowe czynniki rynkowe (Key Drivers).
+- [x] Moduł szybkiego przeliczania Walk-Forward Backtestu z metrykami (Win Rate, Profit Factor, Sharpe Ratio, Max Drawdown) bezpośrednio w interfejsie.
+- [x] Tabela historii ostatnich dobowych predykcji z bazy SQLite oraz przyciski synchronizacji i alertu Telegram.
+
+### Priorytet 6: Konteneryzacja & Hosting w Chmurze (Docker & GCP Always Free)
+- [ ] Zoptymalizowany wieloetapowy `Dockerfile` dla .NET 9 i SQLite.
+- [ ] Konfiguracja pod darmową instancję `e2-micro` w Google Cloud Platform (GCP Always Free Tier).
+- [ ] Automatyczne zarządzanie wolumenem dla bazy `market_data.db` i bezpieczne przekazywanie sekretów Telegrama.
 
 ---
 
@@ -86,5 +96,7 @@ Wymagania: **.NET SDK 9.0+**
    # lub w trybie hot-reload:
    dotnet watch run
    ```
-3. Otwórz w przeglądarce interfejs Swagger UI:
-   👉 **`http://localhost:5078/`**
+3. Otwórz w przeglądarce:
+   - ⚡ **Interaktywny Dashboard TradingView:** 👉 **`http://localhost:5078/`**
+   - 📑 **Dokumentacja API Swagger UI:** 👉 **`http://localhost:5078/swagger`**
+

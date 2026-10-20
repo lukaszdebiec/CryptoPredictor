@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CryptoPredictor | Quantitative AI Alpha Terminal</title>
+  <meta name="description" content="Zaawansowany system predykcyjny dla Bitcoina oparty na ML.NET, mikrostrukturze instrumentów pochodnych i przepływach ETF.">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22><text y=%2226%22 font-size=%2228%22>⚡</text></svg>">
+</head>
+<body>
+  <div class="app-container">
+
+    <!-- Top Header -->
+    <header class="header">
+      <div class="brand-section">
+        <div class="logo-icon">⚡</div>
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <h1 class="brand-title">CryptoPredictor</h1>
+            <span class="brand-badge">Alpha v1.0</span>
+          </div>
+          <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.1rem;">
+            FastTree ML.NET • Derivatives Microstructure • Spot ETF Intelligence
+          </div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="status-badge" title="Automatyczny worker dociąga nową świecę codziennie o 00:05 UTC">
+          <span class="pulse-dot"></span>
+          <span>Worker 00:05 UTC: Aktywny</span>
+        </div>
+
+        <button id="btn-sync" class="btn btn-ghost" title="Wymuś synchronizację rynków">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          Synchronizuj
+        </button>
+
+        <button id="btn-telegram-test" class="btn btn-telegram" title="Wyślij dzisiejszy raport predykcji na Telegram">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+          Alert Telegram
+        </button>
+
+        <a href="/swagger" target="_blank" class="btn btn-ghost" title="Otwórz dokumentację API Swagger UI">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+          API Swagger
+        </a>
+      </div>
+    </header>
+
+    <!-- Hero Cards Section -->
+    <section class="hero-grid">
+      <!-- 1. Current ML Signal & Regime -->
+      <div id="hero-signal-card" class="card hero-prediction-card">
+        <div>
+          <div class="card-label">
+            <span>Sygnał ML (Model FastTree)</span>
+            <span id="label-prediction-date" style="font-family: var(--font-mono); font-size: 0.72rem;">--</span>
+          </div>
+          <div class="signal-headline">
+            <span id="badge-signal" class="signal-badge neutral">ŁADOWANIE...</span>
+          </div>
+          <div id="text-regime" class="regime-text">Analizowanie reżimu rynku...</div>
+        </div>
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.78rem; color: var(--text-muted); margin-top: 0.85rem;">
+            <span>Szansa na wzrost (Bullish Prob)</span>
+            <span id="text-bullish-prob" style="font-family: var(--font-mono); font-weight: 700; color: var(--text-main);">--%</span>
+          </div>
+          <div class="prob-bar-track">
+            <div id="prob-bar-fill" class="prob-bar-fill" style="width: 50%; background: var(--neutral-blue);"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. BTC Price -->
+      <div class="card">
+        <div class="card-label">Bitcoin Close (Spot)</div>
+        <div id="stat-btc-price" class="stat-value">$---,---</div>
+        <div id="stat-btc-change" class="stat-subtext">
+          <span>--% (24h)</span>
+        </div>
+      </div>
+
+      <!-- 3. Fear & Greed -->
+      <div class="card">
+        <div class="card-label">Fear & Greed Index</div>
+        <div id="stat-fng-val" class="stat-value">--</div>
+        <div id="stat-fng-desc" class="stat-subtext">Sentyment: --</div>
+      </div>
+
+      <!-- 4. Funding Z-Score 30d -->
+      <div class="card">
+        <div class="card-label">Funding Rate Z-Score</div>
+        <div id="stat-funding-z" class="stat-value">--</div>
+        <div id="stat-funding-desc" class="stat-subtext">Dźwignia rynku: Neutralna</div>
+      </div>
+
+      <!-- 5. Spot ETF 7d Net Flow -->
+      <div class="card">
+        <div class="card-label">Napływy ETF (7d Skumulowane)</div>
+        <div id="stat-etf-7d" class="stat-value">$--M</div>
+        <div id="stat-etf-daily" class="stat-subtext">Ostatnia sesja: $--M</div>
+      </div>
+    </section>
+
+    <!-- Main Chart Section -->
+    <section class="chart-section">
+      <!-- Left: Interactive TradingView Lightweight Chart -->
+      <div class="card chart-card">
+        <div class="chart-toolbar">
+          <div class="chart-title-group">
+            <div class="chart-title">
+              <span>BTC/USDT</span>
+              <span style="font-size: 0.75rem; color: var(--text-dim); font-weight: 400;">Świece dobowe + Punkty Zwrotne ML</span>
+            </div>
+          </div>
+
+          <div class="timeframe-pill-group">
+            <button class="timeframe-btn" data-days="30">30D</button>
+            <button class="timeframe-btn" data-days="90">90D</button>
+            <button class="timeframe-btn active" data-days="180">180D</button>
+            <button class="timeframe-btn" data-days="365">1Y</button>
+            <button class="timeframe-btn" data-days="0">ALL</button>
+          </div>
+        </div>
+
+        <!-- Floating Price Legend -->
+        <div id="chart-legend" class="chart-legend">
+          <div class="legend-item">Data: <span id="leg-date">--</span></div>
+          <div class="legend-item">O: <span id="leg-open">--</span></div>
+          <div class="legend-item">H: <span id="leg-high">--</span></div>
+          <div class="legend-item">L: <span id="leg-low">--</span></div>
+          <div class="legend-item">C: <span id="leg-close">--</span></div>
+          <div class="legend-item">Vol: <span id="leg-vol">--</span></div>
+        </div>
+
+        <!-- TradingView Candlestick Canvas -->
+        <div id="main-chart"></div>
+
+        <!-- Synchronized Subchart (Indicators) -->
+        <div class="subchart-toolbar">
+          <div class="subchart-title">Wskaźniki Mikrostruktury & Makro</div>
+          <div class="subchart-tabs">
+            <button class="tab-btn active" data-tab="funding">Funding Z-Score</button>
+            <button class="tab-btn" data-tab="etf">ETF Net Flow</button>
+            <button class="tab-btn" data-tab="fng">Fear & Greed</button>
+          </div>
+        </div>
+
+        <div id="sub-chart"></div>
+      </div>
+
+      <!-- Right: AI Drivers & Quick Walk-Forward Backtest -->
+      <div class="side-panel">
+        <!-- Key Drivers -->
+        <div class="card side-panel-card">
+          <div class="panel-heading">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            <span>Kluczowe Czynniki (Key Drivers)</span>
+          </div>
+          <div id="drivers-container" class="driver-list">
+            <div class="driver-item">
+              <span class="driver-icon">⏳</span>
+              <span>Ładowanie diagnozy modelu...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Walk-Forward Backtest Card -->
+        <div class="card side-panel-card backtest-box">
+          <div class="panel-heading">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+            <span>Walk-Forward Backtest</span>
+          </div>
+          <div style="font-size: 0.78rem; color: var(--text-dim);">
+            Symulacja out-of-sample: TP +8%, SL -4%, okno 7 dni.
+          </div>
+
+          <div class="backtest-stat-grid">
+            <div class="backtest-stat-item">
+              <div class="backtest-stat-label">Win Rate</div>
+              <div id="bt-winrate" class="backtest-stat-num text-bullish">--%</div>
+            </div>
+            <div class="backtest-stat-item">
+              <div class="backtest-stat-label">Profit Factor</div>
+              <div id="bt-profitfactor" class="backtest-stat-num">--</div>
+            </div>
+            <div class="backtest-stat-item">
+              <div class="backtest-stat-label">Sharpe Ratio</div>
+              <div id="bt-sharpe" class="backtest-stat-num">--</div>
+            </div>
+            <div class="backtest-stat-item">
+              <div class="backtest-stat-label">Max Drawdown</div>
+              <div id="bt-drawdown" class="backtest-stat-num text-bearish">--%</div>
+            </div>
+          </div>
+
+          <button id="btn-run-backtest" class="btn btn-primary" style="margin-top: 0.35rem; width: 100%; justify-content: center;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            Przelicz Backtest
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Historical Predictions Table -->
+    <section class="history-section">
+      <div class="card table-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <div class="chart-title">
+            <span>Dziennik Ostatnich Predykcji (SQLite)</span>
+          </div>
+          <span style="font-size: 0.75rem; color: var(--text-dim);">Zapisywane codziennie przez DailyMarketDataWorker</span>
+        </div>
+
+        <table class="custom-table">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Cena BTC</th>
+              <th>Sygnał</th>
+              <th>Szansa Wzrostu</th>
+              <th>Reżim Rynku</th>
+              <th>Pewność</th>
+            </tr>
+          </thead>
+          <tbody id="history-table-body">
+            <tr>
+              <td colspan="6" style="text-align: center; padding: 2rem;">Wczytywanie historii predykcji...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div>CryptoPredictor • Zaprojektowany pod .NET 9 & ML.NET • Wszystkie dane z darmowych źródeł (Binance, Farside, Alternative.me, Deribit, Coinbase)</div>
+    </footer>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="/js/lightweight-charts.standalone.production.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
