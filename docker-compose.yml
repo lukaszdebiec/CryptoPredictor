@@ -1,0 +1,24 @@
+services:
+  cryptopredictor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cryptopredictor-app
+    restart: unless-stopped
+    ports:
+      - "5078:5078"
+    volumes:
+      # Persistent storage for SQLite database and ETF cache
+      - ./Data/storage:/app/Data/storage
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5078
+      - Telegram__Enabled=${TELEGRAM_ENABLED:-false}
+      - Telegram__BotToken=${TELEGRAM_BOT_TOKEN:-}
+      - Telegram__ChatId=${TELEGRAM_CHAT_ID:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5078/api/alerts/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

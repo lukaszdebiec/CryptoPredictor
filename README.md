@@ -75,28 +75,42 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] Tabela historii ostatnich dobowych predykcji z bazy SQLite oraz przyciski synchronizacji i alertu Telegram.
 
 ### Priorytet 6: Konteneryzacja & Hosting w Chmurze (Docker & GCP Always Free)
-- [ ] Zoptymalizowany wieloetapowy `Dockerfile` dla .NET 9 i SQLite.
-- [ ] Konfiguracja pod darmową instancję `e2-micro` w Google Cloud Platform (GCP Always Free Tier).
-- [ ] Automatyczne zarządzanie wolumenem dla bazy `market_data.db` i bezpieczne przekazywanie sekretów Telegrama.
+- [x] Zoptymalizowany wieloetapowy `Dockerfile` dla .NET 9 i SQLite z warstwowym buforowaniem NuGet.
+- [x] Konfiguracja `docker-compose.yml` z trwałym wolumenem `./Data/storage` (chroniącym bazę `market_data.db` i cache ETF) oraz healthcheckiem.
+- [x] Szablon `.env.example` dla bezpiecznego przekazywania kluczy bota Telegram bez commitowania sekretów.
+- [ ] Wdrożenie na darmową maszynę `e2-micro` w Google Cloud Platform (GCP Always Free).
 
 ---
 
 ## 🚀 Jak uruchomić projekt
 
+### Opcja 1: Bezpośrednio przez .NET SDK (najszybsza do developingu)
 Wymagania: **.NET SDK 9.0+**
 
-1. Sklonuj repozytorium:
-   ```bash
-   git clone https://github.com/lukaszdebiec/CryptoPredictor.git
-   cd CryptoPredictor
-   ```
-2. Uruchom aplikację:
-   ```bash
-   dotnet run
-   # lub w trybie hot-reload:
-   dotnet watch run
-   ```
-3. Otwórz w przeglądarce:
-   - ⚡ **Interaktywny Dashboard TradingView:** 👉 **`http://localhost:5078/`**
-   - 📑 **Dokumentacja API Swagger UI:** 👉 **`http://localhost:5078/swagger`**
+```bash
+# Uruchomienie aplikacji:
+dotnet run
+
+# lub w trybie hot-reload:
+dotnet watch run
+```
+
+### Opcja 2: Kontener Docker (Docker Compose)
+Wymagania: **Docker Desktop**
+
+```bash
+# Zbudowanie obrazu i uruchomienie w tle:
+docker compose up -d --build
+
+# Sprawdzenie logów aplikacji:
+docker compose logs -f
+
+# Zatrzymanie:
+docker compose down
+```
+
+### 🌐 Interfejsy w przeglądarce:
+- ⚡ **Interaktywny Dashboard TradingView:** 👉 **`http://localhost:5078/`**
+- 📑 **Dokumentacja API Swagger UI:** 👉 **`http://localhost:5078/swagger`**
+
 

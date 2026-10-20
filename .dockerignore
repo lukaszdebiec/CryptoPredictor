@@ -1,0 +1,11 @@
+**/.git
+**/.gitignore
+**/.vs
+**/.vscode
+**/bin
+**/obj
+**/scratch
+**/*.user
+**/*.suo
+**/*.db-shm
+**/*.db-wal
