@@ -51,9 +51,12 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] Zoptymalizowane zapytania `LoadRecentAsync(days)` z natywnym `LIMIT` i indeksem po dacie.
 
 
-### Priorytet 3: Automatyczny Background Worker (Harmonogram 00:05 UTC)
-- [ ] Wdrożenie `IHostedService` / `BackgroundService` w .NET.
-- [ ] Automatyczne dociąganie nowo zamkniętej świecy dobowej o północy, przeliczanie cech i zapisywanie świeżej diagnozy rynku w bazie danych.
+### Priorytet 3: Automatyczny Background Worker (Harmonogram 00:05 UTC) ✅
+- [x] Wdrożenie serwisu `DailyMarketDataWorker` jako `BackgroundService` w .NET.
+- [x] Precyzyjny harmonogram: automatyczne dociąganie nowo zamkniętej świecy dobowej codziennie o 00:05 UTC (oraz opcjonalny cykl wstępny przy starcie aplikacji).
+- [x] Automatyczne przeliczanie cech i ponowne dotrenowanie modelu ML (FastTree) po zamknięciu doby.
+- [x] Trwały zapis diagnozy rynku i prognoz w tabeli `MarketPredictions` w SQLite oraz nowy endpoint `GET /api/prediction/history`.
+
 
 ### Priorytet 4: System Alertów i Powiadomień (Telegram Bot / Discord)
 - [ ] Integracja z Telegram Bot API lub webhookiem Discord.

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CryptoPredictor.Data;
+using CryptoPredictor.Prediction;
 using Microsoft.EntityFrameworkCore;
 
 namespace CryptoPredictor.Data.Storage;
@@ -42,6 +43,19 @@ public class SqliteMarketDataStorage : IMarketDataStorage
 
             await using var db = await _contextFactory.CreateDbContextAsync(ct);
             await db.Database.EnsureCreatedAsync(ct);
+
+            // Ensure MarketPredictions table exists even on pre-existing database files
+            await db.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""MarketPredictions"" (
+                    ""Date"" TEXT NOT NULL CONSTRAINT ""PK_MarketPredictions"" PRIMARY KEY,
+                    ""BtcClose"" TEXT NOT NULL,
+                    ""Signal"" TEXT NOT NULL,
+                    ""BullishProbability"" TEXT NOT NULL,
+                    ""MarketRegime"" TEXT NOT NULL,
+                    ""Confidence"" TEXT NOT NULL,
+                    ""KeyDriversJson"" TEXT NOT NULL,
+                    ""CreatedAtUtc"" TEXT NOT NULL
+                );", ct);
 
             // Auto-migration from legacy JSON cache if SQLite table is empty
             if (!await db.MarketData.AnyAsync(ct))
@@ -152,4 +166,98 @@ public class SqliteMarketDataStorage : IMarketDataStorage
         recent.Reverse();
         return recent;
     }
+
+    public async Task SavePredictionAsync(MarketPrediction prediction, CancellationToken ct = default)
+    {
+        if (prediction == null)
+            return;
+
+        await EnsureInitializedAsync(ct);
+
+        await using var db = await _contextFactory.CreateDbContextAsync(ct);
+
+        var existing = await db.Predictions.FirstOrDefaultAsync(p => p.Date == prediction.Date, ct);
+        var driversJson = JsonSerializer.Serialize(prediction.KeyDrivers);
+
+        if (existing != null)
+        {
+            existing.BtcClose = prediction.BtcClose;
+            existing.Signal = prediction.Signal;
+            existing.BullishProbability = prediction.BullishProbability;
+            existing.MarketRegime = prediction.MarketRegime;
+            existing.Confidence = prediction.Confidence;
+            existing.KeyDriversJson = driversJson;
+            existing.CreatedAtUtc = DateTime.UtcNow;
+        }
+        else
+        {
+            db.Predictions.Add(new MarketPredictionRecord
+            {
+                Date = prediction.Date,
+                BtcClose = prediction.BtcClose,
+                Signal = prediction.Signal,
+                BullishProbability = prediction.BullishProbability,
+                MarketRegime = prediction.MarketRegime,
+                Confidence = prediction.Confidence,
+                KeyDriversJson = driversJson,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+        }
+
+        await db.SaveChangesAsync(ct);
+        _logger.LogInformation("Saved market prediction for {Date} to SQLite (Signal: {Signal}, Prob: {Prob:P1}).",
+            prediction.Date, prediction.Signal, prediction.BullishProbability);
+    }
+
+    public async Task<MarketPrediction?> GetLatestPredictionAsync(CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+
+        await using var db = await _contextFactory.CreateDbContextAsync(ct);
+        var record = await db.Predictions
+            .AsNoTracking()
+            .OrderByDescending(p => p.Date)
+            .FirstOrDefaultAsync(ct);
+
+        return record == null ? null : MapToPrediction(record);
+    }
+
+    public async Task<IReadOnlyList<MarketPrediction>> GetPredictionHistoryAsync(int limit = 30, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+
+        await using var db = await _contextFactory.CreateDbContextAsync(ct);
+        var records = await db.Predictions
+            .AsNoTracking()
+            .OrderByDescending(p => p.Date)
+            .Take(limit)
+            .ToListAsync(ct);
+
+        return records.Select(MapToPrediction).ToList();
+    }
+
+    private static MarketPrediction MapToPrediction(MarketPredictionRecord r)
+    {
+        IReadOnlyList<string> drivers;
+        try
+        {
+            drivers = JsonSerializer.Deserialize<List<string>>(r.KeyDriversJson) ?? (IReadOnlyList<string>)Array.Empty<string>();
+        }
+        catch
+        {
+            drivers = Array.Empty<string>();
+        }
+
+        return new MarketPrediction
+        {
+            Date = r.Date,
+            BtcClose = r.BtcClose,
+            Signal = r.Signal,
+            BullishProbability = r.BullishProbability,
+            MarketRegime = r.MarketRegime,
+            Confidence = r.Confidence,
+            KeyDrivers = drivers
+        };
+    }
 }
+

@@ -38,7 +38,11 @@ builder.Services.AddSingleton<ITurningPointDetector, TurningPointDetector>();
 builder.Services.AddSingleton<IPredictorService, PredictorService>();
 builder.Services.AddSingleton<IBacktestEngine, BacktestEngine>();
 
+// Background Worker for automated daily 00:05 UTC cycle
+builder.Services.AddHostedService<CryptoPredictor.Background.DailyMarketDataWorker>();
+
 var app = builder.Build();
+
 
 // Ensure SQLite database is created and auto-migrated from legacy JSON if available
 using (var scope = app.Services.CreateScope())
