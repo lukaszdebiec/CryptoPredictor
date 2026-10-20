@@ -1,3 +1,4 @@
+using CryptoPredictor.Alerts;
 using CryptoPredictor.Backtest;
 using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
@@ -18,6 +19,7 @@ builder.Services.AddHttpClient<ISentimentDataService, SentimentDataService>();
 builder.Services.AddHttpClient<ICoinbaseDataService, CoinbaseDataService>();
 builder.Services.AddHttpClient<IDeribitDataService, DeribitDataService>();
 builder.Services.AddHttpClient<IEtfDataService, FarsideEtfService>();
+builder.Services.AddHttpClient<ITelegramAlertService, TelegramAlertService>();
 
 // SQLite Database configuration
 var storageDir = Path.Combine(builder.Environment.ContentRootPath, "Data", "storage");

@@ -58,9 +58,12 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] Trwały zapis diagnozy rynku i prognoz w tabeli `MarketPredictions` w SQLite oraz nowy endpoint `GET /api/prediction/history`.
 
 
-### Priorytet 4: System Alertów i Powiadomień (Telegram Bot / Discord)
-- [ ] Integracja z Telegram Bot API lub webhookiem Discord.
-- [ ] Automatyczne wysyłanie alertu push na telefon, gdy model zidentyfikuje sygnał o wysokim prawdopodobieństwie (`BULLISH_OPPORTUNITY` z szansą > 70%) lub ostrzeżenie o przegrzaniu (`BEARISH_RISK`).
+### Priorytet 4: System Alertów i Powiadomień (Telegram Bot) ✅
+- [x] Integracja z oficjalnym Telegram Bot API (prosty HTTP Client bez ciężkich bibliotek zewnętrznych).
+- [x] Automatyczne formatowanie alertów HTML ze statystykami: sygnał, prawdopodobieństwo, cena BTC, Fear & Greed, Funding Rate Z-Score, 7-dniowy napływ ETF oraz kluczowe czynniki rynkowe (Key Drivers).
+- [x] Automatyczne wyzwalanie alertu po dobowym cyklu agregacji i predykcji (`DailyMarketDataWorker`).
+- [x] Dedykowany kontroler `AlertsController` (`/api/alerts/status`, `/api/alerts/test`, `/api/alerts/send-today`) ułatwiający weryfikację i ręczne testowanie bota z poziomu Swagger UI.
+- [x] Bezpieczny fallback – brak uzupełnionego tokenu nie zatrzymuje działania aplikacji ani cyklu dobowego.
 
 ### Priorytet 5: Interaktywny Dashboard z Wykresem (TradingView Lightweight Charts)
 - [ ] Prosty, nowoczesny panel frontendowy serwowany z aplikacji.

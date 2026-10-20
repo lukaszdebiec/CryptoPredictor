@@ -1,3 +1,4 @@
+using CryptoPredictor.Alerts;
 using CryptoPredictor.Backtest;
 using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
@@ -149,6 +150,13 @@ public class DailyMarketDataWorker : BackgroundService
 
         // 6. Persist prediction in SQLite
         await storage.SavePredictionAsync(prediction, ct);
+
+        // 7. Dispatch Telegram alert if configured
+        var telegram = scope.ServiceProvider.GetRequiredService<ITelegramAlertService>();
+        if (telegram.IsConfigured)
+        {
+            await telegram.SendPredictionAlertAsync(prediction, ct);
+        }
 
         // 7. Output formatted summary
         _logger.LogInformation("------------------------------------------------------------");
