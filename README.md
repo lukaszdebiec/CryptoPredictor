@@ -74,11 +74,16 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] Moduł szybkiego przeliczania Walk-Forward Backtestu z metrykami (Win Rate, Profit Factor, Sharpe Ratio, Max Drawdown) bezpośrednio w interfejsie.
 - [x] Tabela historii ostatnich dobowych predykcji z bazy SQLite oraz przyciski synchronizacji i alertu Telegram.
 
-### Priorytet 6: Konteneryzacja & Hosting w Chmurze (Docker & GCP Always Free)
+### Priorytet 6: Konteneryzacja & Hosting w Chmurze (Docker & GCP Always Free) ✅
 - [x] Zoptymalizowany wieloetapowy `Dockerfile` dla .NET 9 i SQLite z warstwowym buforowaniem NuGet.
 - [x] Konfiguracja `docker-compose.yml` z trwałym wolumenem `./Data/storage` (chroniącym bazę `market_data.db` i cache ETF) oraz healthcheckiem.
 - [x] Szablon `.env.example` dla bezpiecznego przekazywania kluczy bota Telegram bez commitowania sekretów.
-- [ ] Wdrożenie na darmową maszynę `e2-micro` w Google Cloud Platform (GCP Always Free).
+- [x] Wdrożenie na darmową maszynę `e2-micro` w Google Cloud Platform (GCP Always Free).
+- [x] Inteligentny fallback przed geoblokadą Binance (HTTP 451) w amerykańskich centrach danych (Binance.US + Deribit).
+
+### Priorytet 7: Automatyzacja CI/CD (GitHub Actions Continuous Deployment)
+- [ ] Workflow GitHub Actions automatycznie uruchamiający testy i weryfikację kompilacji po pushu do gałęzi `main`.
+- [ ] Automatyczny deploy na maszynę wirtualną w GCP (pull nowego kodu i przeładowanie kontenera w Dockerze).
 
 ---
 
