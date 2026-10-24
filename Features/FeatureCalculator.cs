@@ -5,6 +5,12 @@ namespace CryptoPredictor.Features;
 public class FeatureCalculator : IFeatureCalculator
 {
     private const double TradingDaysPerYear = 365.0; // Crypto trades 365 days a year
+    private readonly ILiquidityEngine _liquidityEngine;
+
+    public FeatureCalculator(ILiquidityEngine? liquidityEngine = null)
+    {
+        _liquidityEngine = liquidityEngine ?? new LiquidityEngine();
+    }
 
     public IReadOnlyList<DailyFeatures> Calculate(IEnumerable<DailyMarketData> history)
     {
@@ -114,6 +120,9 @@ public class FeatureCalculator : IFeatureCalculator
             var sp500Ret7d = CalculateRelativeChange(sorted, i, 7, d => d.Sp500Close);
             var sp500Ret30d = CalculateRelativeChange(sorted, i, 30, d => d.Sp500Close);
 
+            // 14. Liquidity Pools & Liquidation Walls (Sweep Engine)
+            var liq = _liquidityEngine.CalculateLiquidityLevels(sorted, i);
+
             results.Add(new DailyFeatures
             {
                 Date = current.Date,
@@ -147,7 +156,11 @@ public class FeatureCalculator : IFeatureCalculator
                 DxyZScore30d = dxyZ30d,
                 Us10YYieldChange7d = us10yChg7d,
                 Sp500Return7d = sp500Ret7d,
-                Sp500Return30d = sp500Ret30d
+                Sp500Return30d = sp500Ret30d,
+                DistToLowerLiquidityWall = liq.DistToLowerWallPercent,
+                DistToUpperLiquidityWall = liq.DistToUpperWallPercent,
+                IsLongLiquiditySwept = liq.IsLongLiquiditySwept,
+                IsShortLiquiditySwept = liq.IsShortLiquiditySwept
             });
         }
 

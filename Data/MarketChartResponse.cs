@@ -7,6 +7,7 @@ public sealed record MarketChartResponse
     public required IReadOnlyList<IndicatorDataPoint> Indicators { get; init; }
     public required ChartSummary Summary { get; init; }
     public FibLevelsSummary? Fibonacci { get; init; }
+    public LiquiditySummary? Liquidity { get; init; }
 }
 
 public sealed record CandleDataPoint
@@ -47,6 +48,25 @@ public sealed record IndicatorDataPoint
     public decimal? Us10YearYield { get; init; }
     public decimal? Sp500Close { get; init; }
     public decimal? Sp500Return7d { get; init; }
+    public decimal? DistToLowerLiquidityWall { get; init; }
+    public decimal? DistToUpperLiquidityWall { get; init; }
+}
+
+public sealed record LiquiditySummary
+{
+    public decimal UpperWall50x { get; init; }
+    public decimal UpperWall25x { get; init; }
+    public decimal UpperWall10x { get; init; }
+    public decimal LowerWall50x { get; init; }
+    public decimal LowerWall25x { get; init; }
+    public decimal LowerWall10x { get; init; }
+    public decimal NearestUpperWall { get; init; }
+    public decimal NearestLowerWall { get; init; }
+    public decimal DistToUpperPercent { get; init; }
+    public decimal DistToLowerPercent { get; init; }
+    public bool RecentLongSweep { get; init; }
+    public bool RecentShortSweep { get; init; }
+    public string DominantSide { get; init; } = "";
 }
 
 public sealed record FibLevelsSummary

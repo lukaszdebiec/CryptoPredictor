@@ -136,6 +136,9 @@
               <span>BTC/USDT</span>
               <span style="font-size: 0.75rem; color: var(--text-dim); font-weight: 400;">Daily Candles + ML Turning Points</span>
             </div>
+            <div id="liquidity-badge-container" style="display: flex; gap: 0.5rem; align-items: center;">
+              <span id="badge-liq-magnet" class="liq-badge" style="display: none;">Liq Magnet: --</span>
+            </div>
           </div>
 
           <div class="timeframe-pill-group">
@@ -166,6 +169,7 @@
           <div class="subchart-tabs">
             <button class="tab-btn active" data-tab="funding">Funding Z-Score</button>
             <button class="tab-btn" data-tab="wave">Wave Efficiency (KER)</button>
+            <button class="tab-btn" data-tab="liquidity">Liquidity Walls Proximity</button>
             <button class="tab-btn" data-tab="macro">Global Macro (DXY & S&P)</button>
             <button class="tab-btn" data-tab="etf">ETF Net Flow</button>
             <button class="tab-btn" data-tab="fng">Fear & Greed</button>

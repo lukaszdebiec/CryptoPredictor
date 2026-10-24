@@ -98,7 +98,15 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] Wzbogacenie modelu FastTree ML.NET, reguł heurystycznych oraz generowanych wyjaśnień Key Drivers o relacje makro-płynnościowe.
 - [x] Nowa karta wskaźnika makro w panelu głównym oraz dedykowany wieloosiowy subwykres TradingView zestawiający dynamikę DXY i S&P 500.
 
+### Priorytet 10: Silnik Puli Płynności i Poziomów Likwidacji (Liquidity Sweep Engine & Liquidation Walls) ✅
+- [x] Matematyczny model estymacji poziomów likwidacji pozycji lewarowanych 10x, 25x i 50x (górne i dolne klastry Stop Loss) w oparciu o formuły depozytu zabezpieczającego (Maintenance Margin Rate ~0.5%) i swing pivots.
+- [x] Detekcja wybicia płynności (Liquidity Sweeps / Stop Hunts / SFPs): identyfikacja sytuacji, gdy cena przebija kluczowe dołki/szczyty, czyści klastry zleceń stop-loss i gwałtownie powraca do zakresu (reclaim).
+- [x] Nowe cechy ilościowe w pipeline ML: `DistToLowerLiquidityWall`, `DistToUpperLiquidityWall`, `IsLongLiquiditySwept` i `IsShortLiquiditySwept` zasilające model FastTree ML.NET, wagi heurystyczne oraz Key Drivers.
+- [x] Rozszerzenie API (`/api/marketdata/chart`) o obiekt `LiquiditySummary` (poziomy ścian 50x/25x, dystanse procentowe, strona dominująca) oraz punkty historyczne odległości do ścian.
+- [x] Dynamiczna wizualizacja na TradingView Lightweight Charts: 4 linie cenowe likwidacji (Short Liq 25x/50x w kolorze pomarańczowo-różowym, Long Liq 50x/25x w kolorze błękitnym/morskim), interaktywny badge magnesu płynności oraz dedykowany subwykres z progami ±2%.
+
 ---
+
 
 ## 🚀 Jak uruchomić projekt
 

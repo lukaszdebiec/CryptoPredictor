@@ -43,6 +43,12 @@ public class ModelInput
     public float Us10YYieldChange7d { get; set; }
     public float Sp500Return7d { get; set; }
 
+    // Liquidity Pools & Liquidation Walls (Sweep Engine)
+    public float DistToLowerLiquidityWall { get; set; }
+    public float DistToUpperLiquidityWall { get; set; }
+    public float IsLongLiquiditySwept { get; set; }
+    public float IsShortLiquiditySwept { get; set; }
+
     [ColumnName("Label")]
     public bool Label { get; set; }
 }

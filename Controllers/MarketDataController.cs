@@ -15,17 +15,20 @@ public class MarketDataController : ControllerBase
     private readonly IMarketDataStorage _storage;
     private readonly IFeatureCalculator _featureCalculator;
     private readonly ITurningPointDetector _turningPointDetector;
+    private readonly ILiquidityEngine _liquidityEngine;
 
     public MarketDataController(
         IMarketDataAggregator aggregator,
         IMarketDataStorage storage,
         IFeatureCalculator featureCalculator,
-        ITurningPointDetector turningPointDetector)
+        ITurningPointDetector turningPointDetector,
+        ILiquidityEngine liquidityEngine)
     {
         _aggregator = aggregator;
         _storage = storage;
         _featureCalculator = featureCalculator;
         _turningPointDetector = turningPointDetector;
+        _liquidityEngine = liquidityEngine;
     }
 
     /// <summary>
@@ -204,7 +207,9 @@ public class MarketDataController : ControllerBase
                 DxyZScore30d = feat?.DxyZScore30d,
                 Us10YearYield = day.Us10YearYield > 0m ? day.Us10YearYield : null,
                 Sp500Close = day.Sp500Close > 0m ? day.Sp500Close : null,
-                Sp500Return7d = feat?.Sp500Return7d
+                Sp500Return7d = feat?.Sp500Return7d,
+                DistToLowerLiquidityWall = feat?.DistToLowerLiquidityWall,
+                DistToUpperLiquidityWall = feat?.DistToUpperLiquidityWall
             });
         }
 
@@ -259,13 +264,33 @@ public class MarketDataController : ControllerBase
             }
         }
 
+        // Compute active Liquidity Pools & Liquidation Walls
+        var latestLiq = _liquidityEngine.CalculateLiquidityLevels(sortedData, sortedData.Count - 1);
+        var liqSummary = new LiquiditySummary
+        {
+            UpperWall50x = latestLiq.UpperWall50x,
+            UpperWall25x = latestLiq.UpperWall25x,
+            UpperWall10x = latestLiq.UpperWall10x,
+            LowerWall50x = latestLiq.LowerWall50x,
+            LowerWall25x = latestLiq.LowerWall25x,
+            LowerWall10x = latestLiq.LowerWall10x,
+            NearestUpperWall = latestLiq.NearestUpperWall,
+            NearestLowerWall = latestLiq.NearestLowerWall,
+            DistToUpperPercent = latestLiq.DistToUpperWallPercent,
+            DistToLowerPercent = latestLiq.DistToLowerWallPercent,
+            RecentLongSweep = latestLiq.IsLongLiquiditySwept,
+            RecentShortSweep = latestLiq.IsShortLiquiditySwept,
+            DominantSide = latestLiq.DominantLiquiditySide
+        };
+
         return Ok(new MarketChartResponse
         {
             Candles = candles,
             Markers = markers,
             Indicators = indicators,
             Summary = summary,
-            Fibonacci = fibSummary
+            Fibonacci = fibSummary,
+            Liquidity = liqSummary
         });
     }
 }

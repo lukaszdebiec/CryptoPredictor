@@ -47,4 +47,10 @@ public sealed record DailyFeatures
     public decimal Us10YYieldChange7d { get; init; } // 7-dniowa zmiana rentownosci obligacji USA 10Y (w pkt. proc.)
     public decimal Sp500Return7d { get; init; } // 7-dniowy zwrot S&P 500 (Risk-On / Risk-Off)
     public decimal Sp500Return30d { get; init; } // 30-dniowy trend S&P 500
+
+    // Liquidity Pools & Liquidation Walls (Leverage sweeps & magnetic walls)
+    public decimal DistToLowerLiquidityWall { get; init; } // % odleglosc do dolnej sciany likwidacji
+    public decimal DistToUpperLiquidityWall { get; init; } // % odleglosc do gornej sciany likwidacji
+    public bool IsLongLiquiditySwept { get; init; } // flaga wyciecia Stop Lossow ponizej dolka (Spring)
+    public bool IsShortLiquiditySwept { get; init; } // flaga wyciecia Stop Lossow powyzej szczytu (Upthrust)
 }

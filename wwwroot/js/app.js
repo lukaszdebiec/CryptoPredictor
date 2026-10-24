@@ -23,7 +23,10 @@
   let fngSeries = null;
   let macroDxySeries = null;
   let macroSpSeries = null;
+  let liqUpperSeries = null;
+  let liqLowerSeries = null;
   let activeFibLines = [];
+  let activeLiqLines = [];
 
   // Color constants
   const COLORS = {
@@ -350,6 +353,83 @@
         }
       }
 
+      // Update Liquidity Pools & Liquidation Walls on price chart
+      if (activeLiqLines && activeLiqLines.length > 0) {
+        for (const line of activeLiqLines) {
+          candlestickSeries.removePriceLine(line);
+        }
+        activeLiqLines = [];
+      }
+
+      if (data.liquidity) {
+        const liq = data.liquidity;
+
+        // 1. Short Liquidation Walls (Upper)
+        if (liq.upperWall25x > 0) {
+          activeLiqLines.push(candlestickSeries.createPriceLine({
+            price: Number(liq.upperWall25x),
+            color: 'rgba(244, 63, 94, 0.75)',
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Solid,
+            axisLabelVisible: true,
+            title: `Short Liq 25x ($${formatMoney(liq.upperWall25x)})`
+          }));
+        }
+
+        if (liq.upperWall50x > 0) {
+          activeLiqLines.push(candlestickSeries.createPriceLine({
+            price: Number(liq.upperWall50x),
+            color: 'rgba(244, 63, 94, 0.45)',
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: `Short Liq 50x ($${formatMoney(liq.upperWall50x)})`
+          }));
+        }
+
+        // 2. Long Liquidation Walls (Lower)
+        if (liq.lowerWall50x > 0) {
+          activeLiqLines.push(candlestickSeries.createPriceLine({
+            price: Number(liq.lowerWall50x),
+            color: 'rgba(16, 185, 129, 0.45)',
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: `Long Liq 50x ($${formatMoney(liq.lowerWall50x)})`
+          }));
+        }
+
+        if (liq.lowerWall25x > 0) {
+          activeLiqLines.push(candlestickSeries.createPriceLine({
+            price: Number(liq.lowerWall25x),
+            color: 'rgba(16, 185, 129, 0.75)',
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Solid,
+            axisLabelVisible: true,
+            title: `Long Liq 25x ($${formatMoney(liq.lowerWall25x)})`
+          }));
+        }
+
+        // 3. Update Liquidity Badge in Chart Header
+        const liqBadge = document.getElementById('badge-liq-magnet');
+        if (liqBadge) {
+          liqBadge.style.display = 'inline-flex';
+          if (liq.recentLongSweep) {
+            liqBadge.className = 'liq-badge sweep-alert';
+            liqBadge.innerHTML = '⚡ LONG SWEEP DETECTED';
+          } else if (liq.recentShortSweep) {
+            liqBadge.className = 'liq-badge sweep-alert';
+            liqBadge.innerHTML = '⚡ SHORT SWEEP DETECTED';
+          } else if (liq.distToUpperPercent < liq.distToLowerPercent) {
+            liqBadge.className = 'liq-badge magnet-short';
+            liqBadge.innerHTML = `🧲 Short Liq Wall: $${formatMoney(liq.nearestUpperWall)} (+${liq.distToUpperPercent}%)`;
+          } else {
+            liqBadge.className = 'liq-badge magnet-long';
+            liqBadge.innerHTML = `🧲 Long Liq Wall: $${formatMoney(liq.nearestLowerWall)} (-${liq.distToLowerPercent}%)`;
+          }
+        }
+      }
+
       // Update Subchart
       renderSubchart();
 
@@ -393,6 +473,8 @@
     if (fngSeries) { subChart.removeSeries(fngSeries); fngSeries = null; }
     if (macroDxySeries) { subChart.removeSeries(macroDxySeries); macroDxySeries = null; }
     if (macroSpSeries) { subChart.removeSeries(macroSpSeries); macroSpSeries = null; }
+    if (liqUpperSeries) { subChart.removeSeries(liqUpperSeries); liqUpperSeries = null; }
+    if (liqLowerSeries) { subChart.removeSeries(liqLowerSeries); liqLowerSeries = null; }
 
     // Toggle dual price scale visibility (left scale for S&P 500 equities, right scale for DXY)
     if (activeSubTab === 'macro') {
@@ -545,6 +627,51 @@
 
       macroDxySeries.setData(dxyData);
       macroSpSeries.setData(spData);
+    } else if (activeSubTab === 'liquidity') {
+      liqUpperSeries = subChart.addSeries(LightweightCharts.LineSeries, {
+        color: '#f43f5e',
+        lineWidth: 2,
+        title: 'Distance to Short Liq Wall (%)'
+      });
+
+      liqLowerSeries = subChart.addSeries(LightweightCharts.LineSeries, {
+        color: '#10b981',
+        lineWidth: 2,
+        title: 'Distance to Long Liq Wall (%)'
+      });
+
+      const upperData = indicators
+        .filter(i => i.distToUpperLiquidityWall != null)
+        .map(i => ({ time: i.time, value: Number(i.distToUpperLiquidityWall) }));
+
+      const lowerData = indicators
+        .filter(i => i.distToLowerLiquidityWall != null)
+        .map(i => ({ time: i.time, value: -Number(i.distToLowerLiquidityWall) }));
+
+      liqUpperSeries.setData(upperData);
+      liqLowerSeries.setData(lowerData);
+
+      liqUpperSeries.createPriceLine({
+        price: 0,
+        color: 'rgba(255, 255, 255, 0.35)',
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Solid,
+        title: 'Current Price (Baseline)'
+      });
+      liqUpperSeries.createPriceLine({
+        price: 2.0,
+        color: 'rgba(244, 63, 94, 0.65)',
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        title: 'Short Squeeze Magnet (+2%)'
+      });
+      liqUpperSeries.createPriceLine({
+        price: -2.0,
+        color: 'rgba(16, 185, 129, 0.65)',
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        title: 'Long Flush Magnet (-2%)'
+      });
     }
 
     subChart.timeScale().fitContent();

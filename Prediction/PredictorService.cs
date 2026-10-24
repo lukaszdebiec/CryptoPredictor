@@ -48,6 +48,10 @@ public class PredictorService : IPredictorService
             DxyZScore30d = (float)s.Features.DxyZScore30d,
             Us10YYieldChange7d = (float)s.Features.Us10YYieldChange7d,
             Sp500Return7d = (float)s.Features.Sp500Return7d,
+            DistToLowerLiquidityWall = (float)s.Features.DistToLowerLiquidityWall,
+            DistToUpperLiquidityWall = (float)s.Features.DistToUpperLiquidityWall,
+            IsLongLiquiditySwept = s.Features.IsLongLiquiditySwept ? 1f : 0f,
+            IsShortLiquiditySwept = s.Features.IsShortLiquiditySwept ? 1f : 0f,
             FearGreedIndex = s.Label.IsLocalBottom ? 20f : 50f,
             CoinbasePremium = 0f,
             Label = s.Label.IsForward7dBullish ?? (s.Label.ForwardReturn7d > 0.02m)
@@ -81,7 +85,11 @@ public class PredictorService : IPredictorService
             nameof(ModelInput.DxyReturn7d),
             nameof(ModelInput.DxyZScore30d),
             nameof(ModelInput.Us10YYieldChange7d),
-            nameof(ModelInput.Sp500Return7d)
+            nameof(ModelInput.Sp500Return7d),
+            nameof(ModelInput.DistToLowerLiquidityWall),
+            nameof(ModelInput.DistToUpperLiquidityWall),
+            nameof(ModelInput.IsLongLiquiditySwept),
+            nameof(ModelInput.IsShortLiquiditySwept)
         };
 
         // Train / test split (80% train, 20% test)
@@ -154,6 +162,10 @@ public class PredictorService : IPredictorService
                     DxyZScore30d = (float)todayFeatures.DxyZScore30d,
                     Us10YYieldChange7d = (float)todayFeatures.Us10YYieldChange7d,
                     Sp500Return7d = (float)todayFeatures.Sp500Return7d,
+                    DistToLowerLiquidityWall = (float)todayFeatures.DistToLowerLiquidityWall,
+                    DistToUpperLiquidityWall = (float)todayFeatures.DistToUpperLiquidityWall,
+                    IsLongLiquiditySwept = todayFeatures.IsLongLiquiditySwept ? 1f : 0f,
+                    IsShortLiquiditySwept = todayFeatures.IsShortLiquiditySwept ? 1f : 0f,
                     FearGreedIndex = todayMarket.FearGreedIndex,
                     CoinbasePremium = (float)todayMarket.CoinbasePremium
                 };
@@ -170,6 +182,17 @@ public class PredictorService : IPredictorService
 
         // Interpret signals
         var drivers = new List<string>();
+
+        // Liquidity Sweep & Liquidation Walls Interpretations (Stop hunt / SFP)
+        if (todayFeatures.IsLongLiquiditySwept)
+            drivers.Add("Long Liquidity Sweep detected: Price penetrated below key swing support, wiped out 25x/50x stop-losses, and aggressively reclaimed the range (Bullish Spring).");
+        else if (todayFeatures.IsShortLiquiditySwept)
+            drivers.Add("Short Liquidity Sweep detected: Price spiked above swing resistance to trigger buy-stops, but immediately rejected back into the range (Bearish Upthrust).");
+
+        if (todayFeatures.DistToUpperLiquidityWall > 0m && todayFeatures.DistToUpperLiquidityWall <= 2.2m)
+            drivers.Add($"Price is within {todayFeatures.DistToUpperLiquidityWall:F1}% of the nearest Short Liquidation Wall, acting as an overhead liquidity magnet.");
+        else if (todayFeatures.DistToLowerLiquidityWall > 0m && todayFeatures.DistToLowerLiquidityWall <= 2.2m)
+            drivers.Add($"Price is within {todayFeatures.DistToLowerLiquidityWall:F1}% of the nearest Long Liquidation Wall, warning of local downside stop-run risk.");
 
         if (todayFeatures.IsInGoldenPocket30d)
             drivers.Add($"Price is testing the key 0.618 - 0.650 Fibonacci Golden Pocket (Retracement: {todayFeatures.FibRetracementRatio30d:P1}), a high-probability reversal zone.");
@@ -311,6 +334,12 @@ public class PredictorService : IPredictorService
 
         if (feat.Us10YYieldChange7d < -0.15m) score += 0.04f;
         else if (feat.Us10YYieldChange7d > 0.20m) score -= 0.04f;
+
+        // Liquidity Sweep & Liquidation Wall Dynamics
+        if (feat.IsLongLiquiditySwept) score += 0.10f; // Spring / flush of longs leads to powerful bounce
+        if (feat.IsShortLiquiditySwept) score -= 0.10f; // Upthrust / bull-trap rejection
+        if (feat.DistToUpperLiquidityWall > 0m && feat.DistToUpperLiquidityWall < 1.5m) score += 0.04f; // magnet pull up
+        if (feat.DistToLowerLiquidityWall > 0m && feat.DistToLowerLiquidityWall < 1.5m) score -= 0.04f; // magnet pull down
 
         return Math.Clamp(score, 0.05f, 0.95f);
     }

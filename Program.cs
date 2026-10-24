@@ -36,6 +36,7 @@ builder.Services.AddDbContextFactory<CryptoPredictorDbContext>(options =>
 
 builder.Services.AddSingleton<IMarketDataStorage, SqliteMarketDataStorage>();
 builder.Services.AddScoped<IMarketDataAggregator, MarketDataAggregator>();
+builder.Services.AddSingleton<ILiquidityEngine, LiquidityEngine>();
 builder.Services.AddSingleton<IFeatureCalculator, FeatureCalculator>();
 builder.Services.AddSingleton<ITurningPointDetector, TurningPointDetector>();
 builder.Services.AddSingleton<IPredictorService, PredictorService>();
