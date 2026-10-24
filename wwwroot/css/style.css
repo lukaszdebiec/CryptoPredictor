@@ -200,14 +200,14 @@ body {
 /* Prediction Hero Section */
 .hero-grid {
   display: grid;
-  grid-template-columns: 1.4fr repeat(6, 1fr);
+  grid-template-columns: 1.35fr repeat(7, 1fr);
   gap: 0.85rem;
   margin-bottom: 1.5rem;
 }
 
-@media (max-width: 1480px) {
+@media (max-width: 1560px) {
   .hero-grid {
-    grid-template-columns: 1.4fr repeat(3, 1fr);
+    grid-template-columns: 1.3fr repeat(3, 1fr);
   }
 }
 

@@ -199,7 +199,12 @@ public class MarketDataController : ControllerBase
                 FibRetracementRatio30d = feat?.FibRetracementRatio30d,
                 DistToGoldenPocket30d = feat?.DistToGoldenPocket30d,
                 KaufmanEfficiencyRatio10d = feat?.KaufmanEfficiencyRatio10d,
-                WeeklyTrendBias = feat?.WeeklyTrendBias
+                WeeklyTrendBias = feat?.WeeklyTrendBias,
+                Dxy = day.Dxy > 0m ? day.Dxy : null,
+                DxyZScore30d = feat?.DxyZScore30d,
+                Us10YearYield = day.Us10YearYield > 0m ? day.Us10YearYield : null,
+                Sp500Close = day.Sp500Close > 0m ? day.Sp500Close : null,
+                Sp500Return7d = feat?.Sp500Return7d
             });
         }
 

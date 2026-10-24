@@ -40,4 +40,11 @@ public sealed record DailyFeatures
     public bool IsInGoldenPocket30d { get; init; } // Czy cena znajduje sie w strefie 0.618 - 0.650
     public decimal KaufmanEfficiencyRatio10d { get; init; } // Wskaznik efektywnosci impulsu (KER > 0.55 impuls, < 0.25 korekta)
     public decimal WeeklyTrendBias { get; init; } // Odchylenie od 50-dniowej (7-tygodniowej) sredniej trendu makro
+
+    // Global Macro Dynamics (Liquidity, Currency, & Benchmark Equities)
+    public decimal DxyReturn7d { get; init; } // 7-dniowa dynamika Indeksu Dolara (DXY)
+    public decimal DxyZScore30d { get; init; } // 30-dniowy Z-Score DXY (wybicie vs wyprzedanie dolara)
+    public decimal Us10YYieldChange7d { get; init; } // 7-dniowa zmiana rentownosci obligacji USA 10Y (w pkt. proc.)
+    public decimal Sp500Return7d { get; init; } // 7-dniowy zwrot S&P 500 (Risk-On / Risk-Off)
+    public decimal Sp500Return30d { get; init; } // 30-dniowy trend S&P 500
 }

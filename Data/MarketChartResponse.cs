@@ -42,6 +42,11 @@ public sealed record IndicatorDataPoint
     public decimal? DistToGoldenPocket30d { get; init; }
     public decimal? KaufmanEfficiencyRatio10d { get; init; }
     public decimal? WeeklyTrendBias { get; init; }
+    public decimal? Dxy { get; init; }
+    public decimal? DxyZScore30d { get; init; }
+    public decimal? Us10YearYield { get; init; }
+    public decimal? Sp500Close { get; init; }
+    public decimal? Sp500Return7d { get; init; }
 }
 
 public sealed record FibLevelsSummary

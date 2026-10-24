@@ -19,6 +19,7 @@ builder.Services.AddHttpClient<ISentimentDataService, SentimentDataService>();
 builder.Services.AddHttpClient<ICoinbaseDataService, CoinbaseDataService>();
 builder.Services.AddHttpClient<IDeribitDataService, DeribitDataService>();
 builder.Services.AddHttpClient<IEtfDataService, FarsideEtfService>();
+builder.Services.AddHttpClient<IMacroDataService, MacroDataService>();
 builder.Services.AddHttpClient<ITelegramAlertService, TelegramAlertService>();
 
 // SQLite Database configuration

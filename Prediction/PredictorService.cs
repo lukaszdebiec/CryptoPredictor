@@ -44,6 +44,10 @@ public class PredictorService : IPredictorService
             DistToGoldenPocket30d = (float)s.Features.DistToGoldenPocket30d,
             KaufmanEfficiencyRatio10d = (float)s.Features.KaufmanEfficiencyRatio10d,
             WeeklyTrendBias = (float)s.Features.WeeklyTrendBias,
+            DxyReturn7d = (float)s.Features.DxyReturn7d,
+            DxyZScore30d = (float)s.Features.DxyZScore30d,
+            Us10YYieldChange7d = (float)s.Features.Us10YYieldChange7d,
+            Sp500Return7d = (float)s.Features.Sp500Return7d,
             FearGreedIndex = s.Label.IsLocalBottom ? 20f : 50f,
             CoinbasePremium = 0f,
             Label = s.Label.IsForward7dBullish ?? (s.Label.ForwardReturn7d > 0.02m)
@@ -73,7 +77,11 @@ public class PredictorService : IPredictorService
             nameof(ModelInput.FibRetracementRatio30d),
             nameof(ModelInput.DistToGoldenPocket30d),
             nameof(ModelInput.KaufmanEfficiencyRatio10d),
-            nameof(ModelInput.WeeklyTrendBias)
+            nameof(ModelInput.WeeklyTrendBias),
+            nameof(ModelInput.DxyReturn7d),
+            nameof(ModelInput.DxyZScore30d),
+            nameof(ModelInput.Us10YYieldChange7d),
+            nameof(ModelInput.Sp500Return7d)
         };
 
         // Train / test split (80% train, 20% test)
@@ -142,6 +150,10 @@ public class PredictorService : IPredictorService
                     DistToGoldenPocket30d = (float)todayFeatures.DistToGoldenPocket30d,
                     KaufmanEfficiencyRatio10d = (float)todayFeatures.KaufmanEfficiencyRatio10d,
                     WeeklyTrendBias = (float)todayFeatures.WeeklyTrendBias,
+                    DxyReturn7d = (float)todayFeatures.DxyReturn7d,
+                    DxyZScore30d = (float)todayFeatures.DxyZScore30d,
+                    Us10YYieldChange7d = (float)todayFeatures.Us10YYieldChange7d,
+                    Sp500Return7d = (float)todayFeatures.Sp500Return7d,
                     FearGreedIndex = todayMarket.FearGreedIndex,
                     CoinbasePremium = (float)todayMarket.CoinbasePremium
                 };
@@ -168,6 +180,22 @@ public class PredictorService : IPredictorService
             drivers.Add($"Price action reflects low directional efficiency (KER: {todayFeatures.KaufmanEfficiencyRatio10d:F2}), characteristic of an Elliott Wave corrective structure (Wave 4 / ABC chop).");
         else if (todayFeatures.KaufmanEfficiencyRatio10d > 0.60m)
             drivers.Add($"Price action reflects strong directional momentum (KER: {todayFeatures.KaufmanEfficiencyRatio10d:F2}), indicating Elliott Wave impulse dynamics (Wave 3/5).");
+
+        // Global Macro Interpretations
+        if (todayFeatures.DxyZScore30d < -1.0m || todayFeatures.DxyReturn7d < -0.015m)
+            drivers.Add($"US Dollar Index (DXY) is weakening (Z-Score: {todayFeatures.DxyZScore30d:F2}, 7d: {todayFeatures.DxyReturn7d:P1}), providing a global liquidity tailwind for Bitcoin.");
+        else if (todayFeatures.DxyZScore30d > 1.2m || todayFeatures.DxyReturn7d > 0.015m)
+            drivers.Add($"US Dollar Index (DXY) is surging (Z-Score: {todayFeatures.DxyZScore30d:F2}, 7d: +{todayFeatures.DxyReturn7d:P1}), creating macro dollar liquidity headwinds.");
+
+        if (todayFeatures.Us10YYieldChange7d < -0.15m)
+            drivers.Add($"US 10-Year Treasury Yields eased by {todayFeatures.Us10YYieldChange7d:F2}% over 7 days, reducing benchmark discount rate pressure.");
+        else if (todayFeatures.Us10YYieldChange7d > 0.20m)
+            drivers.Add($"US 10-Year Treasury Yields spiked by +{todayFeatures.Us10YYieldChange7d:F2}% over 7 days, tightening debt and liquidity conditions.");
+
+        if (todayFeatures.Sp500Return7d > 0.02m)
+            drivers.Add($"S&P 500 equity momentum is expanding (+{todayFeatures.Sp500Return7d:P1} over 7d), confirming institutional Risk-On sentiment.");
+        else if (todayFeatures.Sp500Return7d < -0.025m)
+            drivers.Add($"S&P 500 benchmark equities are under pressure ({todayFeatures.Sp500Return7d:P1} over 7d), signaling macro Risk-Off drag.");
 
         if (todayFeatures.FundingZScore30d < -1.0m)
             drivers.Add($"Funding Rate is deeply negative (Z-Score: {todayFeatures.FundingZScore30d:F2}) indicating short-side crowding and potential squeeze.");
@@ -273,6 +301,16 @@ public class PredictorService : IPredictorService
         // Extreme fear
         if (market.FearGreedIndex < 25) score += 0.10f;
         else if (market.FearGreedIndex > 75) score -= 0.10f;
+
+        // Global Macro Dynamics (Liquidity, Currency, & Equities)
+        if (feat.DxyZScore30d < -1.0m) score += 0.06f;
+        else if (feat.DxyZScore30d > 1.2m) score -= 0.07f;
+
+        if (feat.Sp500Return7d > 0.02m) score += 0.05f;
+        else if (feat.Sp500Return7d < -0.025m) score -= 0.06f;
+
+        if (feat.Us10YYieldChange7d < -0.15m) score += 0.04f;
+        else if (feat.Us10YYieldChange7d > 0.20m) score -= 0.04f;
 
         return Math.Clamp(score, 0.05f, 0.95f);
     }

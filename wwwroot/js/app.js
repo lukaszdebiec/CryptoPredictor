@@ -21,6 +21,8 @@
   let waveSeries = null;
   let etfSeries = null;
   let fngSeries = null;
+  let macroDxySeries = null;
+  let macroSpSeries = null;
   let activeFibLines = [];
 
   // Color constants
@@ -389,6 +391,15 @@
     if (waveSeries) { subChart.removeSeries(waveSeries); waveSeries = null; }
     if (etfSeries) { subChart.removeSeries(etfSeries); etfSeries = null; }
     if (fngSeries) { subChart.removeSeries(fngSeries); fngSeries = null; }
+    if (macroDxySeries) { subChart.removeSeries(macroDxySeries); macroDxySeries = null; }
+    if (macroSpSeries) { subChart.removeSeries(macroSpSeries); macroSpSeries = null; }
+
+    // Toggle dual price scale visibility (left scale for S&P 500 equities, right scale for DXY)
+    if (activeSubTab === 'macro') {
+      subChart.priceScale('left').applyOptions({ visible: true });
+    } else {
+      subChart.priceScale('left').applyOptions({ visible: false });
+    }
 
     const indicators = cachedChartData.indicators;
 
@@ -509,6 +520,31 @@
         lineStyle: LightweightCharts.LineStyle.Dotted,
         title: 'Extreme Fear (25)'
       });
+    } else if (activeSubTab === 'macro') {
+      macroDxySeries = subChart.addSeries(LightweightCharts.LineSeries, {
+        priceScaleId: 'right',
+        color: COLORS.cyan,
+        lineWidth: 2,
+        title: 'DXY (Dollar Index)'
+      });
+
+      macroSpSeries = subChart.addSeries(LightweightCharts.LineSeries, {
+        priceScaleId: 'left',
+        color: '#a855f7',
+        lineWidth: 2,
+        title: 'S&P 500 Index'
+      });
+
+      const dxyData = indicators
+        .filter(i => i.dxy != null)
+        .map(i => ({ time: i.time, value: Number(i.dxy) }));
+
+      const spData = indicators
+        .filter(i => i.sp500Close != null)
+        .map(i => ({ time: i.time, value: Number(i.sp500Close) }));
+
+      macroDxySeries.setData(dxyData);
+      macroSpSeries.setData(spData);
     }
 
     subChart.timeScale().fitContent();
@@ -615,6 +651,19 @@
         if (fngDesc) fngDesc.innerHTML = `<span class="${colorClass}">${sentiment}</span>`;
       }
 
+      // Global Macro Card (DXY & US10Y / S&P 500)
+      const macroVal = document.getElementById('stat-macro-val');
+      const macroDesc = document.getElementById('stat-macro-desc');
+      if (macroVal && latest.dxy != null) {
+        const dxyNum = Number(latest.dxy);
+        macroVal.innerText = dxyNum > 0 ? dxyNum.toFixed(2) : '--';
+      }
+      if (macroDesc) {
+        const yld = latest.us10YearYield ? Number(latest.us10YearYield).toFixed(2) + '%' : '--%';
+        const sp = latest.sp500Close ? Number(latest.sp500Close).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '--';
+        macroDesc.innerText = `US10Y: ${yld} | S&P: ${sp}`;
+      }
+
       // Funding & ETF
       const featuresRes = await fetch('/api/marketdata/features?days=1');
       if (featuresRes.ok) {
@@ -645,6 +694,14 @@
           }
           if (etfDaily && latest.bitcoinEtfNetFlowUsd != null) {
             etfDaily.innerText = `Session: ${formatMillions(latest.bitcoinEtfNetFlowUsd)}`;
+          }
+
+          // Global Macro dynamics
+          if (macroVal && f.dxyReturn7d != null) {
+            const dxyRet = Number(f.dxyReturn7d);
+            if (dxyRet < -0.005) macroVal.className = 'stat-value text-bullish';
+            else if (dxyRet > 0.005) macroVal.className = 'stat-value text-bearish';
+            else macroVal.className = 'stat-value';
           }
         }
       }

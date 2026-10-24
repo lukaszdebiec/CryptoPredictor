@@ -9,6 +9,7 @@ public class MarketDataAggregator : IMarketDataAggregator
     private readonly ICoinbaseDataService _coinbaseDataService;
     private readonly IDeribitDataService _deribitDataService;
     private readonly IEtfDataService _etfDataService;
+    private readonly IMacroDataService _macroDataService;
     private readonly IMarketDataStorage _storage;
     private readonly ILogger<MarketDataAggregator> _logger;
 
@@ -18,6 +19,7 @@ public class MarketDataAggregator : IMarketDataAggregator
         ICoinbaseDataService coinbaseDataService,
         IDeribitDataService deribitDataService,
         IEtfDataService etfDataService,
+        IMacroDataService macroDataService,
         IMarketDataStorage storage,
         ILogger<MarketDataAggregator> logger)
     {
@@ -26,6 +28,7 @@ public class MarketDataAggregator : IMarketDataAggregator
         _coinbaseDataService = coinbaseDataService;
         _deribitDataService = deribitDataService;
         _etfDataService = etfDataService;
+        _macroDataService = macroDataService;
         _storage = storage;
         _logger = logger;
     }
@@ -45,8 +48,9 @@ public class MarketDataAggregator : IMarketDataAggregator
         var coinbaseTask = _coinbaseDataService.GetDailyClosePricesAsync(ct);
         var dvolTask = _deribitDataService.GetDailyDvolHistoryAsync(startDate, endDate, ct);
         var etfTask = _etfDataService.GetDailyEtfNetFlowsAsync(ct);
+        var macroTask = _macroDataService.GetMacroHistoryAsync("1y", ct);
 
-        await Task.WhenAll(klinesTask, fundingTask, oiTask, fngTask, coinbaseTask, dvolTask, etfTask);
+        await Task.WhenAll(klinesTask, fundingTask, oiTask, fngTask, coinbaseTask, dvolTask, etfTask, macroTask);
 
         var klines = await klinesTask;
         var fundingMap = await fundingTask;
@@ -55,13 +59,30 @@ public class MarketDataAggregator : IMarketDataAggregator
         var coinbaseMap = await coinbaseTask;
         var dvolMap = await dvolTask;
         var etfMap = await etfTask;
+        var macro = await macroTask;
 
-        _logger.LogInformation("Fetched {KlinesCount} candles, {FundingCount} funding dates, {OiCount} OI dates, {FngCount} F&G dates, {EtfCount} ETF flow dates.",
-            klines.Count, fundingMap.Count, oiMap.Count, fngMap.Count, etfMap.Count);
+        _logger.LogInformation("Fetched {KlinesCount} candles, {FundingCount} funding dates, {OiCount} OI dates, {FngCount} F&G dates, {EtfCount} ETF dates, {DxyCount} DXY dates.",
+            klines.Count, fundingMap.Count, oiMap.Count, fngMap.Count, etfMap.Count, macro.Dxy.Count);
 
         var aggregated = new List<DailyMarketData>();
+        var sortedKlines = klines.OrderBy(k => k.Date).ToList();
 
-        foreach (var kline in klines.OrderBy(k => k.Date))
+        // Seed initial forward-fill states from the earliest available prior macro date
+        var firstDate = sortedKlines.FirstOrDefault()?.Date ?? DateOnly.FromDateTime(DateTime.UtcNow);
+
+        decimal lastDxy = macro.Dxy.Where(kvp => kvp.Key <= firstDate).OrderByDescending(kvp => kvp.Key).Select(kvp => kvp.Value).FirstOrDefault();
+        if (lastDxy == 0m && macro.Dxy.Count > 0) lastDxy = macro.Dxy.OrderBy(kvp => kvp.Key).First().Value;
+
+        decimal lastUs10y = macro.Us10YearYield.Where(kvp => kvp.Key <= firstDate).OrderByDescending(kvp => kvp.Key).Select(kvp => kvp.Value).FirstOrDefault();
+        if (lastUs10y == 0m && macro.Us10YearYield.Count > 0) lastUs10y = macro.Us10YearYield.OrderBy(kvp => kvp.Key).First().Value;
+
+        decimal lastSp500 = macro.Sp500.Where(kvp => kvp.Key <= firstDate).OrderByDescending(kvp => kvp.Key).Select(kvp => kvp.Value).FirstOrDefault();
+        if (lastSp500 == 0m && macro.Sp500.Count > 0) lastSp500 = macro.Sp500.OrderBy(kvp => kvp.Key).First().Value;
+
+        decimal lastNasdaq = macro.Nasdaq.Where(kvp => kvp.Key <= firstDate).OrderByDescending(kvp => kvp.Key).Select(kvp => kvp.Value).FirstOrDefault();
+        if (lastNasdaq == 0m && macro.Nasdaq.Count > 0) lastNasdaq = macro.Nasdaq.OrderBy(kvp => kvp.Key).First().Value;
+
+        foreach (var kline in sortedKlines)
         {
             var date = kline.Date;
 
@@ -71,6 +92,12 @@ public class MarketDataAggregator : IMarketDataAggregator
             coinbaseMap.TryGetValue(date, out var coinbaseClose);
             dvolMap.TryGetValue(date, out var dvol);
             etfMap.TryGetValue(date, out var etfFlow);
+
+            // Forward-fill TradFi calendar gaps (weekends and market holidays)
+            if (macro.Dxy.TryGetValue(date, out var dxyVal) && dxyVal > 0m) lastDxy = dxyVal;
+            if (macro.Us10YearYield.TryGetValue(date, out var us10yVal) && us10yVal > 0m) lastUs10y = us10yVal;
+            if (macro.Sp500.TryGetValue(date, out var sp500Val) && sp500Val > 0m) lastSp500 = sp500Val;
+            if (macro.Nasdaq.TryGetValue(date, out var nasdaqVal) && nasdaqVal > 0m) lastNasdaq = nasdaqVal;
 
             decimal coinbasePremium = 0m;
             if (coinbaseClose > 0m && kline.Close > 0m)
@@ -91,7 +118,11 @@ public class MarketDataAggregator : IMarketDataAggregator
                 CoinbasePremium = coinbasePremium,
                 BtcDvol = dvol,
                 FearGreedIndex = fearGreed > 0 ? fearGreed : 50,
-                BitcoinEtfNetFlowUsd = etfFlow
+                BitcoinEtfNetFlowUsd = etfFlow,
+                Dxy = lastDxy,
+                Us10YearYield = lastUs10y,
+                Sp500Close = lastSp500,
+                NasdaqClose = lastNasdaq
             });
         }
 

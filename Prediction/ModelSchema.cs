@@ -37,6 +37,12 @@ public class ModelInput
     public float KaufmanEfficiencyRatio10d { get; set; }
     public float WeeklyTrendBias { get; set; }
 
+    // Global Macro Dynamics (Liquidity, Currency & Equities)
+    public float DxyReturn7d { get; set; }
+    public float DxyZScore30d { get; set; }
+    public float Us10YYieldChange7d { get; set; }
+    public float Sp500Return7d { get; set; }
+
     [ColumnName("Label")]
     public bool Label { get; set; }
 }

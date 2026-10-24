@@ -107,6 +107,13 @@ public class FeatureCalculator : IFeatureCalculator
             var avg50d = GetRollingAverage(sorted, i, 50, d => d.BtcClose);
             var weeklyTrendBias = avg50d > 0m ? (current.BtcClose - avg50d) / avg50d : 0m;
 
+            // 13. Global Macro Dynamics (DXY, US10Y, S&P 500)
+            var dxyRet7d = CalculateRelativeChange(sorted, i, 7, d => d.Dxy);
+            var dxyZ30d = CalculateRollingZScore(sorted, i, 30, d => d.Dxy);
+            var us10yChg7d = CalculateAbsoluteDifference(sorted, i, 7, d => d.Us10YearYield);
+            var sp500Ret7d = CalculateRelativeChange(sorted, i, 7, d => d.Sp500Close);
+            var sp500Ret30d = CalculateRelativeChange(sorted, i, 30, d => d.Sp500Close);
+
             results.Add(new DailyFeatures
             {
                 Date = current.Date,
@@ -135,7 +142,12 @@ public class FeatureCalculator : IFeatureCalculator
                 DistToGoldenPocket30d = distGoldenPocket,
                 IsInGoldenPocket30d = inGoldenPocket,
                 KaufmanEfficiencyRatio10d = ker10d,
-                WeeklyTrendBias = weeklyTrendBias
+                WeeklyTrendBias = weeklyTrendBias,
+                DxyReturn7d = dxyRet7d,
+                DxyZScore30d = dxyZ30d,
+                Us10YYieldChange7d = us10yChg7d,
+                Sp500Return7d = sp500Ret7d,
+                Sp500Return30d = sp500Ret30d
             });
         }
 
@@ -168,6 +180,19 @@ public class FeatureCalculator : IFeatureCalculator
             return 0m;
 
         return (selector(list[currentIndex]) - baseVal) / Math.Abs(baseVal);
+    }
+
+    private static decimal CalculateAbsoluteDifference(List<DailyMarketData> list, int currentIndex, int lookbackDays, Func<DailyMarketData, decimal> selector)
+    {
+        var targetIndex = currentIndex - lookbackDays;
+        if (targetIndex < 0)
+            return 0m;
+
+        var baseVal = selector(list[targetIndex]);
+        if (baseVal == 0m)
+            return 0m;
+
+        return selector(list[currentIndex]) - baseVal;
     }
 
     private static decimal GetRollingMax(List<DailyMarketData> list, int currentIndex, int windowSize, Func<DailyMarketData, decimal> selector)

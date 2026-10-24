@@ -91,6 +91,13 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] Integracja nowych cech z modelem FastTree GBDT ML.NET, regułami heurystycznymi i diagnozą Key Drivers.
 - [x] Wizualizacja poziomów Fibonacciego i strefy Golden Pocket bezpośrednio na świecach TradingView Lightweight Charts oraz dedykowany subwykres KER w interfejsie.
 
+### Priorytet 9: Integracja Globalnego Makro (DXY, US10Y, S&P 500, NASDAQ) ✅
+- [x] Asynchroniczna integracja bezpłatnego Yahoo Finance API v8 dla kluczowych aktywów makroekonomicznych: Indeksu Dolara (`DX-Y.NYB`), rentowności 10-letnich obligacji USA (`^TNX`), S&P 500 (`^GSPC`) oraz NASDAQ (`^IXIC`).
+- [x] Inteligentny algorytm wyrównywania kalendarza TradFi (forward-fill) eliminujący luki weekendowe i święta rynkowe dla bezszwowej korelacji z rynkiem krypto (24/7).
+- [x] Ilościowe wskaźniki makro: `DxyReturn7d`, `DxyZScore30d` (kontrakcja vs ekspansja płynności dolarowej), `Us10YYieldChange7d` (zmiana kosztu kapitału benchmarkowego) oraz `Sp500Return7d` (apetyt instytucjonalny na ryzyko).
+- [x] Wzbogacenie modelu FastTree ML.NET, reguł heurystycznych oraz generowanych wyjaśnień Key Drivers o relacje makro-płynnościowe.
+- [x] Nowa karta wskaźnika makro w panelu głównym oraz dedykowany wieloosiowy subwykres TradingView zestawiający dynamikę DXY i S&P 500.
+
 ---
 
 ## 🚀 Jak uruchomić projekt
