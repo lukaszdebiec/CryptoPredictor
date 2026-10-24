@@ -40,6 +40,10 @@ public class PredictorService : IPredictorService
             DvolZScore30d = (float)s.Features.DvolZScore30d,
             EtfFlow7d = (float)(s.Features.EtfFlow7d / 1_000_000m), // in millions USD
             EtfFlowZScore30d = (float)s.Features.EtfFlowZScore30d,
+            FibRetracementRatio30d = (float)s.Features.FibRetracementRatio30d,
+            DistToGoldenPocket30d = (float)s.Features.DistToGoldenPocket30d,
+            KaufmanEfficiencyRatio10d = (float)s.Features.KaufmanEfficiencyRatio10d,
+            WeeklyTrendBias = (float)s.Features.WeeklyTrendBias,
             FearGreedIndex = s.Label.IsLocalBottom ? 20f : 50f,
             CoinbasePremium = 0f,
             Label = s.Label.IsForward7dBullish ?? (s.Label.ForwardReturn7d > 0.02m)
@@ -65,7 +69,11 @@ public class PredictorService : IPredictorService
             nameof(ModelInput.FundingZScore90d),
             nameof(ModelInput.DvolZScore30d),
             nameof(ModelInput.EtfFlow7d),
-            nameof(ModelInput.EtfFlowZScore30d)
+            nameof(ModelInput.EtfFlowZScore30d),
+            nameof(ModelInput.FibRetracementRatio30d),
+            nameof(ModelInput.DistToGoldenPocket30d),
+            nameof(ModelInput.KaufmanEfficiencyRatio10d),
+            nameof(ModelInput.WeeklyTrendBias)
         };
 
         // Train / test split (80% train, 20% test)
@@ -130,6 +138,10 @@ public class PredictorService : IPredictorService
                     DvolZScore30d = (float)todayFeatures.DvolZScore30d,
                     EtfFlow7d = (float)(todayFeatures.EtfFlow7d / 1_000_000m),
                     EtfFlowZScore30d = (float)todayFeatures.EtfFlowZScore30d,
+                    FibRetracementRatio30d = (float)todayFeatures.FibRetracementRatio30d,
+                    DistToGoldenPocket30d = (float)todayFeatures.DistToGoldenPocket30d,
+                    KaufmanEfficiencyRatio10d = (float)todayFeatures.KaufmanEfficiencyRatio10d,
+                    WeeklyTrendBias = (float)todayFeatures.WeeklyTrendBias,
                     FearGreedIndex = todayMarket.FearGreedIndex,
                     CoinbasePremium = (float)todayMarket.CoinbasePremium
                 };
@@ -146,6 +158,16 @@ public class PredictorService : IPredictorService
 
         // Interpret signals
         var drivers = new List<string>();
+
+        if (todayFeatures.IsInGoldenPocket30d)
+            drivers.Add($"Price is testing the key 0.618 - 0.650 Fibonacci Golden Pocket (Retracement: {todayFeatures.FibRetracementRatio30d:P1}), a high-probability reversal zone.");
+        else if (todayFeatures.FibRetracementRatio30d >= 0.786m)
+            drivers.Add($"Price has retraced past the 0.786 Fibonacci support ({todayFeatures.FibRetracementRatio30d:P1}), indicating deep corrective pressure.");
+
+        if (todayFeatures.KaufmanEfficiencyRatio10d < 0.25m)
+            drivers.Add($"Price action reflects low directional efficiency (KER: {todayFeatures.KaufmanEfficiencyRatio10d:F2}), characteristic of an Elliott Wave corrective structure (Wave 4 / ABC chop).");
+        else if (todayFeatures.KaufmanEfficiencyRatio10d > 0.60m)
+            drivers.Add($"Price action reflects strong directional momentum (KER: {todayFeatures.KaufmanEfficiencyRatio10d:F2}), indicating Elliott Wave impulse dynamics (Wave 3/5).");
 
         if (todayFeatures.FundingZScore30d < -1.0m)
             drivers.Add($"Funding Rate is deeply negative (Z-Score: {todayFeatures.FundingZScore30d:F2}) indicating short-side crowding and potential squeeze.");
@@ -167,6 +189,11 @@ public class PredictorService : IPredictorService
             drivers.Add($"Net 7-day Spot ETF inflows reached +${todayFeatures.EtfFlow7d / 1_000_000m:F1}M, providing persistent spot liquidity.");
         else if (todayFeatures.EtfFlow7d < -300_000_000m)
             drivers.Add($"Net 7-day Spot ETF outflows reached -${Math.Abs(todayFeatures.EtfFlow7d / 1_000_000m):F1}M, adding supply overhang.");
+
+        if (todayFeatures.WeeklyTrendBias > 0.08m)
+            drivers.Add($"BTC remains comfortably above its 50-day macro trend average (+{todayFeatures.WeeklyTrendBias:P1}), preserving broader bullish structure.");
+        else if (todayFeatures.WeeklyTrendBias < -0.08m)
+            drivers.Add($"BTC is trading below its 50-day macro trend average ({todayFeatures.WeeklyTrendBias:P1}), facing macro trend resistance.");
 
         if (todayFeatures.BtcDrawdownFrom30dHigh < -0.08m)
             drivers.Add($"BTC has experienced significant 30-day drawdown ({todayFeatures.BtcDrawdownFrom30dHigh:P1}).");
@@ -216,6 +243,14 @@ public class PredictorService : IPredictorService
     {
         float score = 0.50f;
 
+        // Fibonacci Golden Pocket (0.618 - 0.650 retracement)
+        if (feat.IsInGoldenPocket30d) score += 0.08f;
+        else if (feat.FibRetracementRatio30d > 0.85m) score -= 0.08f;
+
+        // Wave momentum & trend bias
+        if (feat.WeeklyTrendBias > 0.05m && feat.KaufmanEfficiencyRatio10d < 0.30m) score += 0.05f; // Bullish pullback in macro uptrend
+        else if (feat.WeeklyTrendBias < -0.08m) score -= 0.06f; // Strong macro downtrend resistance
+
         // Negative funding increases bounce probability
         if (feat.FundingZScore30d < -1.5m) score += 0.15f;
         else if (feat.FundingZScore30d < -0.8m) score += 0.08f;
@@ -240,6 +275,5 @@ public class PredictorService : IPredictorService
         else if (market.FearGreedIndex > 75) score -= 0.10f;
 
         return Math.Clamp(score, 0.05f, 0.95f);
-
     }
 }

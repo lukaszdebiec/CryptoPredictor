@@ -86,6 +86,27 @@ public class FeatureCalculator : IFeatureCalculator
             var dvolZ30d = CalculateRollingZScore(sorted, i, 30, d => d.BtcDvol);
             var skewZ30d = CalculateRollingZScore(sorted, i, 30, d => d.Options25DeltaSkew);
 
+            // 10. Fibonacci Retracement & Golden Pocket (30-day swing)
+            var low30d = GetRollingMin(sorted, i, 30, d => d.BtcLow);
+            var swingRange30d = high30d - low30d;
+            decimal fibRatio30d = 0.5m;
+            decimal distGoldenPocket = 0.118m;
+            bool inGoldenPocket = false;
+
+            if (swingRange30d > 0m)
+            {
+                fibRatio30d = Math.Clamp((high30d - current.BtcClose) / swingRange30d, 0m, 1.5m);
+                distGoldenPocket = Math.Abs(fibRatio30d - 0.618m);
+                inGoldenPocket = fibRatio30d >= 0.60m && fibRatio30d <= 0.66m;
+            }
+
+            // 11. Kaufman Efficiency Ratio (Elliott Wave Impulse vs Correction proxy)
+            var ker10d = CalculateKaufmanEfficiencyRatio(sorted, i, 10);
+
+            // 12. Weekly Trend Bias (50-day / ~7-week macro trend average)
+            var avg50d = GetRollingAverage(sorted, i, 50, d => d.BtcClose);
+            var weeklyTrendBias = avg50d > 0m ? (current.BtcClose - avg50d) / avg50d : 0m;
+
             results.Add(new DailyFeatures
             {
                 Date = current.Date,
@@ -109,7 +130,12 @@ public class FeatureCalculator : IFeatureCalculator
                 EtfFlow30d = etfFlow30d,
                 EtfFlowZScore30d = etfFlowZ30d,
                 DvolZScore30d = dvolZ30d,
-                SkewZScore30d = skewZ30d
+                SkewZScore30d = skewZ30d,
+                FibRetracementRatio30d = fibRatio30d,
+                DistToGoldenPocket30d = distGoldenPocket,
+                IsInGoldenPocket30d = inGoldenPocket,
+                KaufmanEfficiencyRatio10d = ker10d,
+                WeeklyTrendBias = weeklyTrendBias
             });
         }
 
@@ -157,6 +183,44 @@ public class FeatureCalculator : IFeatureCalculator
         }
 
         return maxVal;
+    }
+
+    private static decimal GetRollingMin(List<DailyMarketData> list, int currentIndex, int windowSize, Func<DailyMarketData, decimal> selector)
+    {
+        var startIndex = Math.Max(0, currentIndex - windowSize + 1);
+        decimal minVal = selector(list[startIndex]);
+
+        for (int i = startIndex + 1; i <= currentIndex; i++)
+        {
+            var val = selector(list[i]);
+            if (val < minVal)
+                minVal = val;
+        }
+
+        return minVal;
+    }
+
+    private static decimal CalculateKaufmanEfficiencyRatio(List<DailyMarketData> list, int currentIndex, int lookbackDays)
+    {
+        var startIndex = currentIndex - lookbackDays;
+        if (startIndex < 0)
+            return 0.5m;
+
+        // Directional price displacement
+        var displacement = Math.Abs(list[currentIndex].BtcClose - list[startIndex].BtcClose);
+
+        // Volatility path (sum of individual bar-to-bar price moves)
+        decimal totalPath = 0m;
+        for (int k = startIndex + 1; k <= currentIndex; k++)
+        {
+            totalPath += Math.Abs(list[k].BtcClose - list[k - 1].BtcClose);
+        }
+
+        if (totalPath == 0m)
+            return 0m;
+
+        var ratio = displacement / totalPath;
+        return Math.Clamp(ratio, 0m, 1.0m);
     }
 
     private static decimal GetRollingAverage(List<DailyMarketData> list, int currentIndex, int windowSize, Func<DailyMarketData, decimal> selector)

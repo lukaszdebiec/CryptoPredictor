@@ -195,7 +195,11 @@ public class MarketDataController : ControllerBase
                 EtfFlowZScore30d = feat?.EtfFlowZScore30d,
                 OiZScore30d = feat?.OiZScore30d,
                 DvolZScore30d = feat?.DvolZScore30d,
-                FearGreedIndex = day.FearGreedIndex
+                FearGreedIndex = day.FearGreedIndex,
+                FibRetracementRatio30d = feat?.FibRetracementRatio30d,
+                DistToGoldenPocket30d = feat?.DistToGoldenPocket30d,
+                KaufmanEfficiencyRatio10d = feat?.KaufmanEfficiencyRatio10d,
+                WeeklyTrendBias = feat?.WeeklyTrendBias
             });
         }
 
@@ -213,12 +217,50 @@ public class MarketDataController : ControllerBase
             TotalDays = dataSubset.Count
         };
 
+        // Compute active 30-day swing Fibonacci & Wave structure
+        FibLevelsSummary? fibSummary = null;
+        var swing30Days = sortedData.TakeLast(30).ToList();
+        if (swing30Days.Count > 0)
+        {
+            var swingHigh = swing30Days.Max(d => d.BtcHigh);
+            var swingLow = swing30Days.Min(d => d.BtcLow);
+            var range = swingHigh - swingLow;
+
+            if (range > 0)
+            {
+                featureMap.TryGetValue(latest.Date, out var latestFeat);
+                var ker = latestFeat?.KaufmanEfficiencyRatio10d ?? 0m;
+                var currentRatio = (swingHigh - latest.BtcClose) / range;
+                var inGoldenPocket = currentRatio >= 0.60m && currentRatio <= 0.66m;
+                var waveRegime = ker > 0.55m ? "Impulse Wave (Wave 3/5 Momentum)" : (ker < 0.25m ? "Corrective Structure (Wave 4 / ABC Chop)" : "Consolidation / Transitory");
+
+                fibSummary = new FibLevelsSummary
+                {
+                    SwingHigh = swingHigh,
+                    SwingLow = swingLow,
+                    Level0 = swingHigh,
+                    Level236 = Math.Round(swingHigh - (0.236m * range), 2),
+                    Level382 = Math.Round(swingHigh - (0.382m * range), 2),
+                    Level500 = Math.Round(swingHigh - (0.500m * range), 2),
+                    Level618 = Math.Round(swingHigh - (0.618m * range), 2),
+                    Level650 = Math.Round(swingHigh - (0.650m * range), 2),
+                    Level786 = Math.Round(swingHigh - (0.786m * range), 2),
+                    Level1000 = swingLow,
+                    CurrentRatio = Math.Round(currentRatio, 4),
+                    InGoldenPocket = inGoldenPocket,
+                    KaufmanEfficiencyRatio = Math.Round(ker, 4),
+                    WaveRegime = waveRegime
+                };
+            }
+        }
+
         return Ok(new MarketChartResponse
         {
             Candles = candles,
             Markers = markers,
             Indicators = indicators,
-            Summary = summary
+            Summary = summary,
+            Fibonacci = fibSummary
         });
     }
 }

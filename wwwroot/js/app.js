@@ -18,8 +18,10 @@
 
   // Subchart series
   let fundingSeries = null;
+  let waveSeries = null;
   let etfSeries = null;
   let fngSeries = null;
+  let activeFibLines = [];
 
   // Color constants
   const COLORS = {
@@ -250,6 +252,102 @@
         markersPrimitive.setMarkers(data.markers);
       }
 
+      // Update Fibonacci levels & Golden Pocket on price chart
+      if (activeFibLines && activeFibLines.length > 0) {
+        for (const line of activeFibLines) {
+          candlestickSeries.removePriceLine(line);
+        }
+        activeFibLines = [];
+      }
+
+      if (data.fibonacci) {
+        const fib = data.fibonacci;
+
+        // Golden Pocket levels (0.618 - 0.650)
+        activeFibLines.push(candlestickSeries.createPriceLine({
+          price: Number(fib.level618),
+          color: '#f59e0b',
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `Fib 0.618 Pocket ($${Number(fib.level618).toLocaleString('en-US')})`
+        }));
+
+        activeFibLines.push(candlestickSeries.createPriceLine({
+          price: Number(fib.level650),
+          color: '#d97706',
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `Fib 0.650 Pocket ($${Number(fib.level650).toLocaleString('en-US')})`
+        }));
+
+        activeFibLines.push(candlestickSeries.createPriceLine({
+          price: Number(fib.level500),
+          color: 'rgba(148, 163, 184, 0.45)',
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: `Fib 0.500 ($${Number(fib.level500).toLocaleString('en-US')})`
+        }));
+
+        activeFibLines.push(candlestickSeries.createPriceLine({
+          price: Number(fib.level382),
+          color: 'rgba(56, 189, 248, 0.4)',
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: `Fib 0.382 ($${Number(fib.level382).toLocaleString('en-US')})`
+        }));
+
+        activeFibLines.push(candlestickSeries.createPriceLine({
+          price: Number(fib.level786),
+          color: 'rgba(244, 63, 94, 0.4)',
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: `Fib 0.786 ($${Number(fib.level786).toLocaleString('en-US')})`
+        }));
+
+        // Update Fibonacci & Wave Stat Cards
+        const fibRatioElem = document.getElementById('stat-fib-ratio');
+        const fibDescElem = document.getElementById('stat-fib-desc');
+        if (fibRatioElem) {
+          const ratioPercent = (Number(fib.currentRatio) * 100).toFixed(1);
+          fibRatioElem.innerText = `${ratioPercent}%`;
+          if (fib.inGoldenPocket) {
+            fibRatioElem.className = 'stat-value text-amber';
+            if (fibDescElem) fibDescElem.innerHTML = `<span class="badge-golden-pocket">GOLDEN POCKET 🎯</span>`;
+          } else if (fib.currentRatio >= 0.786) {
+            fibRatioElem.className = 'stat-value text-bearish';
+            if (fibDescElem) fibDescElem.innerText = `Głęboka korekta (>0.786)`;
+          } else if (fib.currentRatio <= 0.382) {
+            fibRatioElem.className = 'stat-value text-bullish';
+            if (fibDescElem) fibDescElem.innerText = `Płytka korekta (<0.382)`;
+          } else {
+            fibRatioElem.className = 'stat-value';
+            if (fibDescElem) fibDescElem.innerText = `Kieszeń: $${Number(fib.level650).toLocaleString('en-US', {maximumFractionDigits:0})} - $${Number(fib.level618).toLocaleString('en-US', {maximumFractionDigits:0})}`;
+          }
+        }
+
+        const kerElem = document.getElementById('stat-ker-val');
+        const kerDescElem = document.getElementById('stat-ker-desc');
+        if (kerElem) {
+          const kerVal = Number(fib.kaufmanEfficiencyRatio);
+          kerElem.innerText = kerVal.toFixed(2);
+          if (kerVal > 0.55) {
+            kerElem.className = 'stat-value text-bullish';
+            if (kerDescElem) kerDescElem.innerHTML = `<span class="text-bullish">Fala Impulsowa (3/5)</span>`;
+          } else if (kerVal < 0.25) {
+            kerElem.className = 'stat-value text-amber';
+            if (kerDescElem) kerDescElem.innerHTML = `<span class="text-amber">Korekta ABC / Chop</span>`;
+          } else {
+            kerElem.className = 'stat-value';
+            if (kerDescElem) kerDescElem.innerText = `Reżim przejściowy`;
+          }
+        }
+      }
+
       // Update Subchart
       renderSubchart();
 
@@ -288,6 +386,7 @@
 
     // Remove previous series if any
     if (fundingSeries) { subChart.removeSeries(fundingSeries); fundingSeries = null; }
+    if (waveSeries) { subChart.removeSeries(waveSeries); waveSeries = null; }
     if (etfSeries) { subChart.removeSeries(etfSeries); etfSeries = null; }
     if (fngSeries) { subChart.removeSeries(fngSeries); fngSeries = null; }
 
@@ -327,6 +426,40 @@
         lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Dashed,
         title: 'Oversold (-2.0)'
+      });
+
+    } else if (activeSubTab === 'wave') {
+      waveSeries = subChart.addSeries(LightweightCharts.AreaSeries, {
+        topColor: 'rgba(245, 158, 11, 0.35)',
+        bottomColor: 'rgba(245, 158, 11, 0.02)',
+        lineColor: '#f59e0b',
+        lineWidth: 2,
+        title: 'Kaufman Wave Efficiency (KER 10d)'
+      });
+
+      const seriesData = indicators
+        .filter(i => i.kaufmanEfficiencyRatio10d != null)
+        .map(i => ({
+          time: i.time,
+          value: Number(i.kaufmanEfficiencyRatio10d)
+        }));
+
+      waveSeries.setData(seriesData);
+
+      waveSeries.createPriceLine({
+        price: 0.55,
+        color: 'rgba(16, 185, 129, 0.75)',
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        title: 'Impulse Momentum (>0.55)'
+      });
+
+      waveSeries.createPriceLine({
+        price: 0.25,
+        color: 'rgba(244, 63, 94, 0.75)',
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        title: 'Corrective Chop (<0.25)'
       });
 
     } else if (activeSubTab === 'etf') {

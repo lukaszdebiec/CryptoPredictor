@@ -6,6 +6,7 @@ public sealed record MarketChartResponse
     public required IReadOnlyList<ChartMarkerPoint> Markers { get; init; }
     public required IReadOnlyList<IndicatorDataPoint> Indicators { get; init; }
     public required ChartSummary Summary { get; init; }
+    public FibLevelsSummary? Fibonacci { get; init; }
 }
 
 public sealed record CandleDataPoint
@@ -37,6 +38,28 @@ public sealed record IndicatorDataPoint
     public decimal? OiZScore30d { get; init; }
     public decimal? DvolZScore30d { get; init; }
     public decimal? FearGreedIndex { get; init; }
+    public decimal? FibRetracementRatio30d { get; init; }
+    public decimal? DistToGoldenPocket30d { get; init; }
+    public decimal? KaufmanEfficiencyRatio10d { get; init; }
+    public decimal? WeeklyTrendBias { get; init; }
+}
+
+public sealed record FibLevelsSummary
+{
+    public decimal SwingHigh { get; init; }
+    public decimal SwingLow { get; init; }
+    public decimal Level0 { get; init; }
+    public decimal Level236 { get; init; }
+    public decimal Level382 { get; init; }
+    public decimal Level500 { get; init; }
+    public decimal Level618 { get; init; }
+    public decimal Level650 { get; init; }
+    public decimal Level786 { get; init; }
+    public decimal Level1000 { get; init; }
+    public decimal CurrentRatio { get; init; }
+    public bool InGoldenPocket { get; init; }
+    public decimal KaufmanEfficiencyRatio { get; init; }
+    public string WaveRegime { get; init; } = "";
 }
 
 public sealed record ChartSummary

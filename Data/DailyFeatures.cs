@@ -34,5 +34,10 @@ public sealed record DailyFeatures
     public decimal DvolZScore30d { get; init; } // available (wyliczane z BtcDvol)
     public decimal SkewZScore30d { get; init; } // not available (wymaga płatnych danych historycznych 25d skew)
 
-    // etc...
+    // Fibonacci & Wave Dynamics (Elliott wave impulse vs correction proxy)
+    public decimal FibRetracementRatio30d { get; init; } // Pozycja ceny w swingu 30d (0.0 = szczyt, 1.0 = dolek)
+    public decimal DistToGoldenPocket30d { get; init; } // |FibRatio - 0.618|
+    public bool IsInGoldenPocket30d { get; init; } // Czy cena znajduje sie w strefie 0.618 - 0.650
+    public decimal KaufmanEfficiencyRatio10d { get; init; } // Wskaznik efektywnosci impulsu (KER > 0.55 impuls, < 0.25 korekta)
+    public decimal WeeklyTrendBias { get; init; } // Odchylenie od 50-dniowej (7-tygodniowej) sredniej trendu makro
 }

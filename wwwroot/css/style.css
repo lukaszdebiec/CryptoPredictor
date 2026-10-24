@@ -200,9 +200,47 @@ body {
 /* Prediction Hero Section */
 .hero-grid {
   display: grid;
-  grid-template-columns: 1.35fr repeat(4, 1fr);
-  gap: 1rem;
+  grid-template-columns: 1.4fr repeat(6, 1fr);
+  gap: 0.85rem;
   margin-bottom: 1.5rem;
+}
+
+@media (max-width: 1480px) {
+  .hero-grid {
+    grid-template-columns: 1.4fr repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 1024px) {
+  .hero-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .hero-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.text-amber { color: var(--warning-amber); }
+
+.badge-golden-pocket {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 0.72rem;
+  display: inline-block;
+  animation: pulse-amber 2s infinite;
+}
+
+@keyframes pulse-amber {
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6); }
+  70% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
 }
 
 .card {

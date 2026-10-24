@@ -31,6 +31,12 @@ public class ModelInput
     public float FearGreedIndex { get; set; }
     public float CoinbasePremium { get; set; }
 
+    // Quantitative Fibonacci & Wave Dynamics
+    public float FibRetracementRatio30d { get; set; }
+    public float DistToGoldenPocket30d { get; set; }
+    public float KaufmanEfficiencyRatio10d { get; set; }
+    public float WeeklyTrendBias { get; set; }
+
     [ColumnName("Label")]
     public bool Label { get; set; }
 }

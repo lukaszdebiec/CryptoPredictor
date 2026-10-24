@@ -85,6 +85,12 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] Workflow GitHub Actions automatycznie kompilujący i weryfikujący projekt (.NET 9 SDK Release) po pushu do gałęzi `main`.
 - [x] W pełni zautomatyzowany deploy na maszynę wirtualną w GCP przez dedykowany klucz SSH (`git pull` + `docker compose up -d --build`).
 
+### Priorytet 8: Silnik Fal i Poziomów Fibonacciego (Golden Pocket & Kaufman Wave Efficiency) ✅
+- [x] Matematyczna inżynieria cech: dynamiczny 30-dniowy zakres swing, współczynnik zniesienia Fibonacciego (`FibRetracementRatio30d`), odległość i flaga złotej kieszeni (`IsInGoldenPocket30d` dla 0.618–0.650).
+- [x] Kaufman Efficiency Ratio (KER 10d) jako ilościowy estymator dynamiki fal Elliotta (fala impulsowa >0.55 vs struktura korekcyjna ABC <0.25) oraz 50-dniowy trend makro (`WeeklyTrendBias`).
+- [x] Integracja nowych cech z modelem FastTree GBDT ML.NET, regułami heurystycznymi i diagnozą Key Drivers.
+- [x] Wizualizacja poziomów Fibonacciego i strefy Golden Pocket bezpośrednio na świecach TradingView Lightweight Charts oraz dedykowany subwykres KER w interfejsie.
+
 ---
 
 ## 🚀 Jak uruchomić projekt
