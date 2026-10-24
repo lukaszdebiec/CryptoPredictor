@@ -6,8 +6,18 @@
 
   // State
   let currentDays = 180;
+  let currentTimeframe = '1d'; // '1d' | '4h'
   let activeSubTab = 'funding'; // 'funding' | 'etf' | 'fng'
   let cachedChartData = null;
+
+  // Helper to parse time for Lightweight Charts (supports both 'YYYY-MM-DD' and numeric unix seconds)
+  function parseChartTime(timeVal) {
+    if (typeof timeVal === 'number') return timeVal;
+    if (!timeVal) return timeVal;
+    const num = Number(timeVal);
+    if (!isNaN(num) && num > 1000000) return num;
+    return timeVal;
+  }
 
   // Chart instances
   let mainChart = null;
@@ -243,7 +253,22 @@
   }
 
   function setLegendValues(time, o, h, l, c, v) {
-    document.getElementById('leg-date').innerText = time || '--';
+    let displayTime = '--';
+    const numTime = typeof time === 'number' ? time : (time && !isNaN(Number(time)) && Number(time) > 1000000 ? Number(time) : null);
+    if (numTime != null) {
+      const d = new Date(numTime * 1000);
+      const yr = d.getUTCFullYear();
+      const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const da = String(d.getUTCDate()).padStart(2, '0');
+      const hr = String(d.getUTCHours()).padStart(2, '0');
+      const mn = String(d.getUTCMinutes()).padStart(2, '0');
+      displayTime = `${yr}-${mo}-${da} ${hr}:${mn} UTC`;
+    } else if (typeof time === 'string') {
+      displayTime = time;
+    } else if (time && time.year) {
+      displayTime = `${time.year}-${String(time.month).padStart(2, '0')}-${String(time.day).padStart(2, '0')}`;
+    }
+    document.getElementById('leg-date').innerText = displayTime;
     document.getElementById('leg-open').innerText = o ? formatMoney(o) : '--';
     document.getElementById('leg-high').innerText = h ? formatMoney(h) : '--';
     document.getElementById('leg-low').innerText = l ? formatMoney(l) : '--';
@@ -259,18 +284,28 @@
   }
 
   // Fetch Chart Data from API
-  async function loadChartData(days = currentDays) {
+  async function loadChartData(days = currentDays, timeframe = currentTimeframe) {
     try {
-      const url = days > 0 ? `/api/marketdata/chart?days=${days}` : `/api/marketdata/chart`;
+      currentDays = days;
+      currentTimeframe = timeframe;
+      const url = `/api/marketdata/chart?days=${days}&timeframe=${timeframe}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data = await res.json();
       cachedChartData = data;
 
+      // Update Subtitle description
+      const subtitle = document.getElementById('chart-timeframe-desc');
+      if (subtitle) {
+        subtitle.innerText = timeframe === '4h' 
+          ? '4-Hour Candles + Intraday Microstructure & Sweeps' 
+          : 'Daily Candles + ML Turning Points';
+      }
+
       // Map candles to LightweightCharts format
       const candleData = data.candles.map(c => ({
-        time: c.time,
+        time: parseChartTime(c.time),
         open: Number(c.open),
         high: Number(c.high),
         low: Number(c.low),
@@ -281,7 +316,7 @@
 
       // Map volume data
       const volData = data.candles.map(c => ({
-        time: c.time,
+        time: parseChartTime(c.time),
         value: Number(c.volume),
         color: Number(c.close) >= Number(c.open) ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)'
       }));
@@ -289,7 +324,10 @@
 
       // Set markers (local bottoms and tops)
       if (markersPrimitive && data.markers) {
-        markersPrimitive.setMarkers(data.markers);
+        markersPrimitive.setMarkers(data.markers.map(m => ({
+          ...m,
+          time: parseChartTime(m.time)
+        })));
       }
 
       // Update Fibonacci levels & Golden Pocket on price chart
@@ -518,9 +556,9 @@
             predictionUpperSeries.applyOptions({ color: bandColor });
             predictionLowerSeries.applyOptions({ color: bandColor });
 
-            predictionCenterSeries.setData(pred.projectionCone.map(p => ({ time: p.time, value: Number(p.expectedPrice) })));
-            predictionUpperSeries.setData(pred.projectionCone.map(p => ({ time: p.time, value: Number(p.upperBand) })));
-            predictionLowerSeries.setData(pred.projectionCone.map(p => ({ time: p.time, value: Number(p.lowerBand) })));
+            predictionCenterSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.expectedPrice) })));
+            predictionUpperSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.upperBand) })));
+            predictionLowerSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.lowerBand) })));
           } else {
             predictionCenterSeries.setData([]);
             predictionUpperSeries.setData([]);
@@ -608,7 +646,7 @@
 
       const seriesData = indicators
         .filter(i => i.fundingZScore30d != null)
-        .map(i => ({ time: i.time, value: Number(i.fundingZScore30d) }));
+        .map(i => ({ time: parseChartTime(i.time), value: Number(i.fundingZScore30d) }));
 
       fundingSeries.setData(seriesData);
 
@@ -641,13 +679,13 @@
         bottomColor: 'rgba(245, 158, 11, 0.02)',
         lineColor: '#f59e0b',
         lineWidth: 2,
-        title: 'Kaufman Wave Efficiency (KER 10d)'
+        title: 'Kaufman Wave Efficiency (KER)'
       });
 
       const seriesData = indicators
         .filter(i => i.kaufmanEfficiencyRatio10d != null)
         .map(i => ({
-          time: i.time,
+          time: parseChartTime(i.time),
           value: Number(i.kaufmanEfficiencyRatio10d)
         }));
 
@@ -679,7 +717,7 @@
         .map(i => {
           const val = Number(i.etfFlowDailyUsd);
           return {
-            time: i.time,
+            time: parseChartTime(i.time),
             value: val,
             color: val >= 0 ? 'rgba(16, 185, 129, 0.85)' : 'rgba(244, 63, 94, 0.85)'
           };
@@ -698,7 +736,7 @@
 
       const seriesData = indicators
         .filter(i => i.fearGreedIndex != null)
-        .map(i => ({ time: i.time, value: Number(i.fearGreedIndex) }));
+        .map(i => ({ time: parseChartTime(i.time), value: Number(i.fearGreedIndex) }));
 
       fngSeries.setData(seriesData);
 
@@ -733,11 +771,11 @@
 
       const dxyData = indicators
         .filter(i => i.dxy != null)
-        .map(i => ({ time: i.time, value: Number(i.dxy) }));
+        .map(i => ({ time: parseChartTime(i.time), value: Number(i.dxy) }));
 
       const spData = indicators
         .filter(i => i.sp500Close != null)
-        .map(i => ({ time: i.time, value: Number(i.sp500Close) }));
+        .map(i => ({ time: parseChartTime(i.time), value: Number(i.sp500Close) }));
 
       macroDxySeries.setData(dxyData);
       macroSpSeries.setData(spData);
@@ -756,11 +794,11 @@
 
       const upperData = indicators
         .filter(i => i.distToUpperLiquidityWall != null)
-        .map(i => ({ time: i.time, value: Number(i.distToUpperLiquidityWall) }));
+        .map(i => ({ time: parseChartTime(i.time), value: Number(i.distToUpperLiquidityWall) }));
 
       const lowerData = indicators
         .filter(i => i.distToLowerLiquidityWall != null)
-        .map(i => ({ time: i.time, value: -Number(i.distToLowerLiquidityWall) }));
+        .map(i => ({ time: parseChartTime(i.time), value: -Number(i.distToLowerLiquidityWall) }));
 
       liqUpperSeries.setData(upperData);
       liqLowerSeries.setData(lowerData);
@@ -1064,6 +1102,44 @@
 
   // Setup UI Event Listeners
   function setupEvents() {
+    // Resolution selector (1D vs 4H)
+    document.querySelectorAll('.res-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.classList.contains('active')) return;
+        document.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentTimeframe = btn.dataset.res || '1d';
+        
+        // Dynamically adjust range buttons for 4H or 1D
+        const tfBtns = document.querySelectorAll('.timeframe-btn');
+        if (currentTimeframe === '4h') {
+          if (tfBtns.length >= 5) {
+            tfBtns[0].innerText = '7D'; tfBtns[0].dataset.days = '7';
+            tfBtns[1].innerText = '14D'; tfBtns[1].dataset.days = '14';
+            tfBtns[2].innerText = '30D'; tfBtns[2].dataset.days = '30';
+            tfBtns[3].innerText = '60D'; tfBtns[3].dataset.days = '60';
+            tfBtns[4].innerText = 'ALL'; tfBtns[4].dataset.days = '0';
+          }
+          tfBtns.forEach(b => b.classList.remove('active'));
+          if (tfBtns[2]) tfBtns[2].classList.add('active');
+          currentDays = 30;
+        } else {
+          if (tfBtns.length >= 5) {
+            tfBtns[0].innerText = '30D'; tfBtns[0].dataset.days = '30';
+            tfBtns[1].innerText = '90D'; tfBtns[1].dataset.days = '90';
+            tfBtns[2].innerText = '180D'; tfBtns[2].dataset.days = '180';
+            tfBtns[3].innerText = '1Y'; tfBtns[3].dataset.days = '365';
+            tfBtns[4].innerText = 'ALL'; tfBtns[4].dataset.days = '0';
+          }
+          tfBtns.forEach(b => b.classList.remove('active'));
+          if (tfBtns[2]) tfBtns[2].classList.add('active');
+          currentDays = 180;
+        }
+
+        loadChartData(currentDays, currentTimeframe);
+      });
+    });
+
     // Timeframe range buttons
     document.querySelectorAll('.timeframe-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1071,7 +1147,7 @@
         btn.classList.add('active');
         const days = parseInt(btn.dataset.days, 10);
         currentDays = days;
-        loadChartData(days);
+        loadChartData(days, currentTimeframe);
       });
     });
 

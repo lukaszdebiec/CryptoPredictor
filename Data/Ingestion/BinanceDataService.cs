@@ -52,6 +52,44 @@ public class BinanceDataService : IBinanceDataService
         }
     }
 
+    public async Task<IReadOnlyList<BinanceIntradayKline>> GetIntradayKlinesAsync(string symbol = "BTCUSDT", string interval = "4h", int limit = 500, CancellationToken ct = default)
+    {
+        var url = $"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}";
+        var response = await _httpClient.GetAsync(url, ct);
+
+        if ((int)response.StatusCode == 451 || !response.IsSuccessStatusCode)
+        {
+            response.Dispose();
+            var usUrl = $"https://api.binance.us/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}";
+            response = await _httpClient.GetAsync(usUrl, ct);
+        }
+
+        response.EnsureSuccessStatusCode();
+
+        using (response)
+        {
+            using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var jsonDoc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+            var list = new List<BinanceIntradayKline>();
+
+            foreach (var item in jsonDoc.RootElement.EnumerateArray())
+            {
+                var openTimeMs = item[0].GetInt64();
+                var openTime = DateTimeOffset.FromUnixTimeMilliseconds(openTimeMs);
+                var open = decimal.Parse(item[1].GetString()!, CultureInfo.InvariantCulture);
+                var high = decimal.Parse(item[2].GetString()!, CultureInfo.InvariantCulture);
+                var low = decimal.Parse(item[3].GetString()!, CultureInfo.InvariantCulture);
+                var close = decimal.Parse(item[4].GetString()!, CultureInfo.InvariantCulture);
+                var volume = decimal.Parse(item[5].GetString()!, CultureInfo.InvariantCulture);
+
+                list.Add(new BinanceIntradayKline(openTime, open, high, low, close, volume));
+            }
+
+            return list;
+        }
+    }
+
     public async Task<IReadOnlyDictionary<DateOnly, decimal>> GetDailyFundingRatesAsync(string symbol = "BTCUSDT", int limit = 1000, CancellationToken ct = default)
     {
         try

@@ -232,7 +232,11 @@
           <div class="chart-title-group">
             <div class="chart-title">
               <span>BTC/USDT</span>
-              <span style="font-size: 0.75rem; color: var(--text-dim); font-weight: 400;">Daily Candles + ML Turning Points</span>
+              <div class="resolution-switch" id="resolution-selector">
+                <button class="res-btn active" data-res="1d" title="Daily Candles (1D)">1D</button>
+                <button class="res-btn" data-res="4h" title="4-Hour Candles (4H)">4H</button>
+              </div>
+              <span id="chart-timeframe-desc" style="font-size: 0.75rem; color: var(--text-dim); font-weight: 400;">Daily Candles + ML Turning Points</span>
             </div>
             <div id="liquidity-badge-container" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
               <span id="badge-liq-magnet" class="liq-badge" style="display: none;">Liq Magnet: --</span>

@@ -111,6 +111,14 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] **Reorganizacja Metryk w Siatkę 2x4:** Podział górnych kafelków na dwa rzędy po cztery elementy (eliminacja pustej przestrzeni i ucinania długich liczb, dodanie zakresu 24h Low/High).
 - [x] **Interaktywne Tooltipy Informacyjne `?`:** Dedykowane okienka wyjaśniające znaczenie każdego wskaźnika (m.in. dynamika fal KER, strefa Golden Pocket, Z-score fundingu, przepływy ETF, makro TradFi) po najechaniu myszą lub kliknięciu.
 
+### Priorytet 12: Obsługa Multi-Timeframe (Intraday 4H z Binance, Przełącznik 1D/4H, Dynamiczne Likwidacje 4H i Punkty Zwrotne) ✅
+- [x] **Asynchroniczny Ingestion Świec 4H z Binance:** Rozszerzenie `IBinanceDataService` o metodę `GetIntradayKlinesAsync` pobierającą świece 4H OHLCV z automatycznym buforowaniem w pamięci (TTL 60s) oraz bezpiecznym fallbackiem `Binance.US` w chmurze GCP.
+- [x] **Przełącznik Rozdzielczości 1D / 4H w UI:** Elegancki przełącznik `[ 1D ]` `[ 4H ]` w pasku narzędzi wykresu umożliwiający bezszwowe przełączanie między horyzontem dziennym a 4-godzinnym bez przeładowania strony.
+- [x] **Adaptacyjne Punkty Zwrotne 4H (Intraday Turning Points):** Dedykowana detekcja lokalnych dołków i szczytów 4H w 48-godzinnym oknie czasowym z dynamicznym progiem odbicia $\ge 1.5\%$.
+- [x] **Ściany Likwidacji 4H & Detekcja Polowań (Stop Hunts / SFPs):** Wyliczanie klastrów likwidacji 25x i 50x z węższych swingów 4H, dające natychmiastową informację o intraday liquidity sweepach.
+- [x] **Inteligentne Filtry Zakresu:** Automatyczna adaptacja przycisków zakresu (`7D` | `14D` | `30D` | `60D` | `ALL` dla 4H oraz `30D` | `90D` | `180D` | `1Y` | `ALL` dla 1D).
+- [x] **Precyzyjny Datownik w Legendzie:** Wyświetlanie pełnego czasu UTC z godziną i minutą (`YYYY-MM-DD HH:mm UTC`) dla świec 4H.
+
 ---
 
 
