@@ -166,57 +166,57 @@
 
         <div id="sub-chart"></div>
       </div>
+    </section>
 
-      <!-- Right: AI Drivers & Quick Walk-Forward Backtest -->
-      <div class="side-panel">
-        <!-- Key Drivers -->
-        <div class="card side-panel-card">
-          <div class="panel-heading">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-            <span>Kluczowe Czynniki (Key Drivers)</span>
+    <!-- Insights & Backtest Section (Below Chart) -->
+    <section class="analytics-grid">
+      <!-- Key Drivers (Left) -->
+      <div class="card analytics-card">
+        <div class="panel-heading">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+          <span>Kluczowe Czynniki (Key Drivers)</span>
+        </div>
+        <div id="drivers-container" class="driver-list">
+          <div class="driver-item">
+            <span class="driver-icon">⏳</span>
+            <span>Ładowanie diagnozy modelu...</span>
           </div>
-          <div id="drivers-container" class="driver-list">
-            <div class="driver-item">
-              <span class="driver-icon">⏳</span>
-              <span>Ładowanie diagnozy modelu...</span>
-            </div>
+        </div>
+      </div>
+
+      <!-- Walk-Forward Backtest Card (Right) -->
+      <div class="card analytics-card backtest-box">
+        <div class="panel-heading">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+          <span>Walk-Forward Backtest</span>
+        </div>
+        <div style="font-size: 0.78rem; color: var(--text-dim);">
+          Symulacja out-of-sample: TP +8%, SL -4%, okno 7 dni.
+        </div>
+
+        <div class="backtest-stat-grid">
+          <div class="backtest-stat-item">
+            <div class="backtest-stat-label">Win Rate</div>
+            <div id="bt-winrate" class="backtest-stat-num text-bullish">--%</div>
+          </div>
+          <div class="backtest-stat-item">
+            <div class="backtest-stat-label">Profit Factor</div>
+            <div id="bt-profitfactor" class="backtest-stat-num">--</div>
+          </div>
+          <div class="backtest-stat-item">
+            <div class="backtest-stat-label">Sharpe Ratio</div>
+            <div id="bt-sharpe" class="backtest-stat-num">--</div>
+          </div>
+          <div class="backtest-stat-item">
+            <div class="backtest-stat-label">Max Drawdown</div>
+            <div id="bt-drawdown" class="backtest-stat-num text-bearish">--%</div>
           </div>
         </div>
 
-        <!-- Walk-Forward Backtest Card -->
-        <div class="card side-panel-card backtest-box">
-          <div class="panel-heading">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-            <span>Walk-Forward Backtest</span>
-          </div>
-          <div style="font-size: 0.78rem; color: var(--text-dim);">
-            Symulacja out-of-sample: TP +8%, SL -4%, okno 7 dni.
-          </div>
-
-          <div class="backtest-stat-grid">
-            <div class="backtest-stat-item">
-              <div class="backtest-stat-label">Win Rate</div>
-              <div id="bt-winrate" class="backtest-stat-num text-bullish">--%</div>
-            </div>
-            <div class="backtest-stat-item">
-              <div class="backtest-stat-label">Profit Factor</div>
-              <div id="bt-profitfactor" class="backtest-stat-num">--</div>
-            </div>
-            <div class="backtest-stat-item">
-              <div class="backtest-stat-label">Sharpe Ratio</div>
-              <div id="bt-sharpe" class="backtest-stat-num">--</div>
-            </div>
-            <div class="backtest-stat-item">
-              <div class="backtest-stat-label">Max Drawdown</div>
-              <div id="bt-drawdown" class="backtest-stat-num text-bearish">--%</div>
-            </div>
-          </div>
-
-          <button id="btn-run-backtest" class="btn btn-primary" style="margin-top: 0.35rem; width: 100%; justify-content: center;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            Przelicz Backtest
-          </button>
-        </div>
+        <button id="btn-run-backtest" class="btn btn-primary" style="margin-top: 0.35rem; width: 100%; justify-content: center;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          Przelicz Backtest
+        </button>
       </div>
     </section>
 

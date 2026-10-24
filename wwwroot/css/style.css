@@ -370,9 +370,8 @@ body {
 
 /* Main Chart Layout */
 .chart-section {
-  display: grid;
-  grid-template-columns: 1fr 340px;
-  gap: 1.25rem;
+  display: block;
+  width: 100%;
   margin-bottom: 1.5rem;
 }
 
@@ -503,19 +502,28 @@ body {
   font-weight: 600;
 }
 
-/* Side Intelligence Panel */
-.side-panel {
-  display: flex;
-  flex-direction: column;
+/* Analytics & Backtest Section (Below Chart) */
+.analytics-grid {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
   gap: 1.25rem;
+  margin-bottom: 1.5rem;
 }
 
-.side-panel-card {
-  padding: 1.15rem;
+@media (max-width: 1024px) {
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.analytics-card, .side-panel-card {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .panel-heading {
-  font-size: 0.92rem;
+  font-size: 0.95rem;
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -524,9 +532,9 @@ body {
 }
 
 .driver-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.65rem;
 }
 
 .driver-item {
@@ -694,9 +702,6 @@ body {
 @media (max-width: 1200px) {
   .hero-grid {
     grid-template-columns: 1fr 1fr;
-  }
-  .chart-section {
-    grid-template-columns: 1fr;
   }
 }
 
