@@ -81,9 +81,9 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] Wdrożenie na darmową maszynę `e2-micro` w Google Cloud Platform (GCP Always Free).
 - [x] Inteligentny fallback przed geoblokadą Binance (HTTP 451) w amerykańskich centrach danych (Binance.US + Deribit).
 
-### Priorytet 7: Automatyzacja CI/CD (GitHub Actions Continuous Deployment)
-- [ ] Workflow GitHub Actions automatycznie uruchamiający testy i weryfikację kompilacji po pushu do gałęzi `main`.
-- [ ] Automatyczny deploy na maszynę wirtualną w GCP (pull nowego kodu i przeładowanie kontenera w Dockerze).
+### Priorytet 7: Automatyzacja CI/CD (GitHub Actions Continuous Deployment) ✅
+- [x] Workflow GitHub Actions automatycznie kompilujący i weryfikujący projekt (.NET 9 SDK Release) po pushu do gałęzi `main`.
+- [x] W pełni zautomatyzowany deploy na maszynę wirtualną w GCP przez dedykowany klucz SSH (`git pull` + `docker compose up -d --build`).
 
 ---
 

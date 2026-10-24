@@ -1,0 +1,50 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build & Verify (.NET 9)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore Dependencies
+        run: dotnet restore CryptoPredictor.csproj
+
+      - name: Build Application (Release)
+        run: dotnet build CryptoPredictor.csproj --configuration Release --no-restore
+
+  deploy:
+    name: Deploy to GCP Always Free VM
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Execute Deployment via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -e
+            cd ~/CryptoPredictor
+            echo "==> Pulling latest code from main..."
+            git pull origin main
+            echo "==> Rebuilding and restarting Docker container..."
+            sudo docker compose up -d --build
+            echo "==> Verifying container status..."
+            sleep 5
+            sudo docker compose ps
+            echo "==> Deployment successfully finished!"
