@@ -320,13 +320,13 @@
             if (fibDescElem) fibDescElem.innerHTML = `<span class="badge-golden-pocket">GOLDEN POCKET 🎯</span>`;
           } else if (fib.currentRatio >= 0.786) {
             fibRatioElem.className = 'stat-value text-bearish';
-            if (fibDescElem) fibDescElem.innerText = `Głęboka korekta (>0.786)`;
+            if (fibDescElem) fibDescElem.innerText = `Deep retracement (>0.786)`;
           } else if (fib.currentRatio <= 0.382) {
             fibRatioElem.className = 'stat-value text-bullish';
-            if (fibDescElem) fibDescElem.innerText = `Płytka korekta (<0.382)`;
+            if (fibDescElem) fibDescElem.innerText = `Shallow retracement (<0.382)`;
           } else {
             fibRatioElem.className = 'stat-value';
-            if (fibDescElem) fibDescElem.innerText = `Kieszeń: $${Number(fib.level650).toLocaleString('en-US', {maximumFractionDigits:0})} - $${Number(fib.level618).toLocaleString('en-US', {maximumFractionDigits:0})}`;
+            if (fibDescElem) fibDescElem.innerText = `Pocket: $${Number(fib.level650).toLocaleString('en-US', {maximumFractionDigits:0})} - $${Number(fib.level618).toLocaleString('en-US', {maximumFractionDigits:0})}`;
           }
         }
 
@@ -337,13 +337,13 @@
           kerElem.innerText = kerVal.toFixed(2);
           if (kerVal > 0.55) {
             kerElem.className = 'stat-value text-bullish';
-            if (kerDescElem) kerDescElem.innerHTML = `<span class="text-bullish">Fala Impulsowa (3/5)</span>`;
+            if (kerDescElem) kerDescElem.innerHTML = `<span class="text-bullish">Impulse Wave (3/5)</span>`;
           } else if (kerVal < 0.25) {
             kerElem.className = 'stat-value text-amber';
-            if (kerDescElem) kerDescElem.innerHTML = `<span class="text-amber">Korekta ABC / Chop</span>`;
+            if (kerDescElem) kerDescElem.innerHTML = `<span class="text-amber">ABC Correction / Chop</span>`;
           } else {
             kerElem.className = 'stat-value';
-            if (kerDescElem) kerDescElem.innerText = `Reżim przejściowy`;
+            if (kerDescElem) kerDescElem.innerText = `Transitory Regime`;
           }
         }
       }
@@ -376,7 +376,7 @@
 
     } catch (err) {
       console.error('Failed to load chart data:', err);
-      showToast('Błąd pobierania danych wykresu: ' + err.message, 'error');
+      showToast('Failed to load chart data: ' + err.message, 'error');
     }
   }
 
@@ -576,7 +576,7 @@
           driversContainer.innerHTML = `
             <div class="driver-item">
               <span class="driver-icon">ℹ️</span>
-              <span>Wskaźniki rynkowe w normie stacjonarnej.</span>
+              <span>Market indicators within stationary baseline.</span>
             </div>
           `;
         }
@@ -629,9 +629,9 @@
             const z = Number(f.fundingZScore30d);
             fundVal.innerText = (z > 0 ? '+' : '') + z.toFixed(2);
             if (fundDesc) {
-              if (z > 1.5) fundDesc.innerHTML = '<span class="text-bearish">Przegrzana dźwignia Long</span>';
-              else if (z < -1.5) fundDesc.innerHTML = '<span class="text-bullish">Presja Short / Wyprzedanie</span>';
-              else fundDesc.innerHTML = '<span class="text-neutral">Dźwignia zrównoważona</span>';
+              if (z > 1.5) fundDesc.innerHTML = '<span class="text-bearish">Overheated Long Leverage</span>';
+              else if (z < -1.5) fundDesc.innerHTML = '<span class="text-bullish">Short Squeeze Pressure / Oversold</span>';
+              else fundDesc.innerHTML = '<span class="text-neutral">Balanced Leverage</span>';
             }
           }
 
@@ -644,7 +644,7 @@
             else etf7d.className = 'stat-value text-bearish';
           }
           if (etfDaily && latest.bitcoinEtfNetFlowUsd != null) {
-            etfDaily.innerText = `Sesja: ${formatMillions(latest.bitcoinEtfNetFlowUsd)}`;
+            etfDaily.innerText = `Session: ${formatMillions(latest.bitcoinEtfNetFlowUsd)}`;
           }
         }
       }
@@ -665,7 +665,7 @@
       if (!tbody) return;
 
       if (!items || items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 1.5rem; color: var(--text-dim);">Brak zapisanych predykcji. Pierwsza pojawi się po zakończeniu dobowego cyklu.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 1.5rem; color: var(--text-dim);">No recorded predictions yet. The first will be saved after the daily 00:05 UTC cycle.</td></tr>`;
         return;
       }
 
@@ -699,7 +699,7 @@
     const btn = document.getElementById('btn-run-backtest');
     if (btn) {
       btn.disabled = true;
-      btn.innerHTML = `<span class="pulse-dot"></span> Symulowanie...`;
+      btn.innerHTML = `<span class="pulse-dot"></span> Simulating...`;
     }
 
     try {
@@ -726,15 +726,15 @@
       document.getElementById('bt-sharpe').innerText = report.sharpeRatio != null ? report.sharpeRatio.toFixed(2) : 'N/A';
       document.getElementById('bt-drawdown').innerText = maxDd;
 
-      showToast(`Backtest zakończony! Liczba transakcji: ${report.trades.length}, Win Rate: ${winRate}`, 'success');
+      showToast(`Backtest completed! Trades: ${report.trades.length}, Win Rate: ${winRate}`, 'success');
 
     } catch (err) {
       console.error('Backtest error:', err);
-      showToast('Błąd backtestu: ' + err.message, 'error');
+      showToast('Backtest error: ' + err.message, 'error');
     } finally {
       if (btn) {
         btn.disabled = false;
-        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Przelicz Backtest`;
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Run Backtest`;
       }
     }
   }
@@ -767,22 +767,22 @@
     if (btnSync) {
       btnSync.addEventListener('click', async () => {
         btnSync.disabled = true;
-        btnSync.innerHTML = `<span class="pulse-dot"></span> Pobieranie...`;
-        showToast('Rozpoczęto synchronizację danych z Binance, Farside ETF i Deribit...', 'info');
+        btnSync.innerHTML = `<span class="pulse-dot"></span> Syncing...`;
+        showToast('Syncing market data from Binance, Farside ETF, and Deribit...', 'info');
 
         try {
           const res = await fetch('/api/marketdata/sync?days=180', { method: 'POST' });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-          showToast('Synchronizacja zakończona sukcesem!', 'success');
+          showToast('Market data synchronized successfully!', 'success');
           await loadChartData(currentDays);
           await loadTodayPrediction();
           await loadHistoricalPredictions();
         } catch (e) {
-          showToast('Błąd synchronizacji: ' + e.message, 'error');
+          showToast('Sync error: ' + e.message, 'error');
         } finally {
           btnSync.disabled = false;
-          btnSync.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg> Synchronizuj`;
+          btnSync.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg> Sync Markets`;
         }
       });
     }
@@ -792,22 +792,22 @@
     if (btnTelegram) {
       btnTelegram.addEventListener('click', async () => {
         btnTelegram.disabled = true;
-        btnTelegram.innerText = 'Wysyłanie...';
+        btnTelegram.innerText = 'Sending...';
 
         try {
           const res = await fetch('/api/alerts/send-today', { method: 'POST' });
           const json = await res.json();
 
           if (json.sent) {
-            showToast('Powiadomienie z raportem wysłane na Telegram!', 'success');
+            showToast('Telegram prediction report delivered successfully!', 'success');
           } else {
-            showToast(json.message || 'Bot Telegram nie jest jeszcze skonfigurowany w appsettings.json', 'info');
+            showToast(json.message || 'Telegram Bot is not configured yet in appsettings.json', 'info');
           }
         } catch (e) {
-          showToast('Błąd połączenia z API alertów: ' + e.message, 'error');
+          showToast('Failed to reach alerts API: ' + e.message, 'error');
         } finally {
           btnTelegram.disabled = false;
-          btnTelegram.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg> Alert Telegram`;
+          btnTelegram.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg> Telegram Alert`;
         }
       });
     }
