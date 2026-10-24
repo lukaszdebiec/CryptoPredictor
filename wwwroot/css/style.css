@@ -197,23 +197,17 @@ body {
   border-color: #38bdf8;
 }
 
-/* Prediction Hero Section */
+/* Prediction Hero Section (2 rows of 4 cards) */
 .hero-grid {
   display: grid;
-  grid-template-columns: 1.35fr repeat(7, 1fr);
-  gap: 0.85rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
   margin-bottom: 1.5rem;
 }
 
-@media (max-width: 1560px) {
+@media (max-width: 1200px) {
   .hero-grid {
-    grid-template-columns: 1.3fr repeat(3, 1fr);
-  }
-}
-
-@media (max-width: 1024px) {
-  .hero-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -222,6 +216,7 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
 
 .text-amber { color: var(--warning-amber); }
 
@@ -280,10 +275,13 @@ body {
   backdrop-filter: blur(16px);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 1.15rem;
+  padding: 1.15rem 1.25rem;
   position: relative;
-  overflow: hidden;
-  transition: transform 0.2s ease, border-color 0.2s ease;
+  overflow: visible;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .card:hover {
@@ -322,6 +320,97 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* Card Interactive Info Tooltip */
+.tooltip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  cursor: help;
+  position: relative;
+  transition: all 0.2s ease;
+  line-height: 1;
+  user-select: none;
+}
+
+.tooltip-trigger:hover, .tooltip-trigger:focus {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: #38bdf8;
+  color: #38bdf8;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.35);
+  outline: none;
+}
+
+.tooltip-trigger .tooltip-content {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: -8px;
+  width: 270px;
+  background: rgba(15, 23, 42, 0.97);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 0.9rem;
+  color: #cbd5e1;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  white-space: normal;
+}
+
+.tooltip-trigger .tooltip-content strong {
+  color: var(--accent-cyan);
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.tooltip-trigger:hover .tooltip-content, 
+.tooltip-trigger:focus .tooltip-content,
+.tooltip-trigger.active .tooltip-content {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tooltip-trigger .tooltip-content::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  right: 12px;
+  width: 8px;
+  height: 8px;
+  background: rgba(15, 23, 42, 0.97);
+  border-left: 1px solid rgba(56, 189, 248, 0.35);
+  border-top: 1px solid rgba(56, 189, 248, 0.35);
+  transform: rotate(45deg);
+}
+
+.card:has(.tooltip-trigger:hover), 
+.card:has(.tooltip-trigger:focus),
+.card:has(.tooltip-trigger.active) {
+  z-index: 50;
 }
 
 .signal-headline {
@@ -366,10 +455,20 @@ body {
 
 .stat-value {
   font-family: var(--font-mono);
-  font-size: 1.65rem;
+  font-size: 1.7rem;
   font-weight: 700;
   color: var(--text-main);
   letter-spacing: -0.02em;
+  white-space: nowrap;
+  line-height: 1.2;
+  margin: 0.25rem 0;
+}
+
+.card-extra-stat {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 0.35rem;
 }
 
 .stat-subtext {
@@ -511,11 +610,90 @@ body {
   color: var(--accent-cyan);
 }
 
+#main-chart {
+  width: 100%;
+  height: 560px;
+  position: relative;
+}
+
 #sub-chart {
   width: 100%;
-  height: 160px;
-  margin-top: 0.5rem;
+  height: 220px;
+  margin-top: 0.35rem;
+  position: relative;
 }
+
+/* Draggable Chart Splitters / Resizers */
+.chart-resizer {
+  width: 100%;
+  height: 12px;
+  margin: 3px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: row-resize;
+  user-select: none;
+  touch-action: none;
+  position: relative;
+  transition: background 0.15s ease;
+  border-radius: var(--radius-sm);
+  z-index: 10;
+}
+
+.chart-resizer:hover, .chart-resizer.dragging {
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.resizer-handle {
+  width: 50px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(148, 163, 184, 0.35);
+  transition: all 0.2s ease;
+}
+
+.chart-resizer:hover .resizer-handle, .chart-resizer.dragging .resizer-handle {
+  width: 90px;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
+}
+
+.size-btn {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid var(--border-color);
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.55rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.size-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+  border-color: var(--accent-cyan);
+}
+
+/* Maximize / Fullscreen Card State */
+.chart-card.fullscreen-mode {
+  position: fixed;
+  inset: 1.5rem;
+  z-index: 9999;
+  background: rgba(13, 19, 34, 0.98);
+  backdrop-filter: blur(28px);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.9);
+  overflow-y: auto;
+  margin: 0;
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+}
+
 
 /* Floating Chart Legend */
 .chart-legend {
@@ -731,16 +909,7 @@ body {
 }
 
 /* Responsive */
-@media (max-width: 1200px) {
-  .hero-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
 @media (max-width: 640px) {
-  .hero-grid {
-    grid-template-columns: 1fr;
-  }
   .header {
     flex-direction: column;
     align-items: flex-start;
@@ -751,3 +920,101 @@ body {
     justify-content: space-between;
   }
 }
+
+/* Forecast Cone & Dynamic Targets Styles */
+.cone-toggle-btn {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 0.28rem 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: all 0.2s ease;
+}
+
+.cone-toggle-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: var(--text-main);
+}
+
+.cone-toggle-btn.active {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: #38bdf8;
+  color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+}
+
+.target-badge {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.02em;
+}
+
+.target-badge.bullish-target {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.target-badge.bearish-target {
+  background: rgba(244, 63, 94, 0.12);
+  color: #f43f5e;
+  border: 1px solid rgba(244, 63, 94, 0.35);
+}
+
+.pred-targets-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+  align-items: center;
+}
+
+.target-pill, .invalidation-pill, .rr-pill {
+  font-family: var(--font-mono);
+  font-size: 0.70rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.target-pill {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.target-pill.bearish-side {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.invalidation-pill {
+  background: rgba(244, 63, 94, 0.12);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+}
+
+.invalidation-pill.bullish-side {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.rr-pill {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+

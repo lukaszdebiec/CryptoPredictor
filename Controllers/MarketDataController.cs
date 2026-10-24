@@ -3,6 +3,7 @@ using CryptoPredictor.Data;
 using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
+using CryptoPredictor.Prediction;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CryptoPredictor.Controllers;
@@ -16,19 +17,22 @@ public class MarketDataController : ControllerBase
     private readonly IFeatureCalculator _featureCalculator;
     private readonly ITurningPointDetector _turningPointDetector;
     private readonly ILiquidityEngine _liquidityEngine;
+    private readonly IPredictorService _predictor;
 
     public MarketDataController(
         IMarketDataAggregator aggregator,
         IMarketDataStorage storage,
         IFeatureCalculator featureCalculator,
         ITurningPointDetector turningPointDetector,
-        ILiquidityEngine liquidityEngine)
+        ILiquidityEngine liquidityEngine,
+        IPredictorService predictor)
     {
         _aggregator = aggregator;
         _storage = storage;
         _featureCalculator = featureCalculator;
         _turningPointDetector = turningPointDetector;
         _liquidityEngine = liquidityEngine;
+        _predictor = predictor;
     }
 
     /// <summary>
@@ -283,6 +287,28 @@ public class MarketDataController : ControllerBase
             DominantSide = latestLiq.DominantLiquiditySide
         };
 
+        // Compute active Prediction Cone & Target/Invalidation levels
+        featureMap.TryGetValue(latest.Date, out var latestFeatForPred);
+        PredictionSummary? predSummary = null;
+        if (latestFeatForPred != null)
+        {
+            var pred = _predictor.Predict(latestFeatForPred, latest);
+            predSummary = new PredictionSummary
+            {
+                Signal = pred.Signal,
+                BullishProbability = pred.BullishProbability,
+                MarketRegime = pred.MarketRegime,
+                Confidence = pred.Confidence,
+                TargetPrice = pred.TargetPrice,
+                InvalidationPrice = pred.InvalidationPrice,
+                TargetChangePercent = pred.TargetChangePercent,
+                InvalidationChangePercent = pred.InvalidationChangePercent,
+                RiskRewardRatio = pred.RiskRewardRatio,
+                HorizonDays = pred.HorizonDays,
+                ProjectionCone = pred.ProjectionCone
+            };
+        }
+
         return Ok(new MarketChartResponse
         {
             Candles = candles,
@@ -290,7 +316,8 @@ public class MarketDataController : ControllerBase
             Indicators = indicators,
             Summary = summary,
             Fibonacci = fibSummary,
-            Liquidity = liqSummary
+            Liquidity = liqSummary,
+            Prediction = predSummary
         });
     }
 }

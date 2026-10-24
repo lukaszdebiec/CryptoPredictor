@@ -27,6 +27,13 @@
   let liqLowerSeries = null;
   let activeFibLines = [];
   let activeLiqLines = [];
+  let activeTargetLines = [];
+  let predictionUpperSeries = null;
+  let predictionLowerSeries = null;
+  let predictionCenterSeries = null;
+  let showForecastCone = true;
+  let currentMainHeight = parseInt(localStorage.getItem('cp_main_chart_height') || '560', 10);
+  let currentSubHeight = parseInt(localStorage.getItem('cp_sub_chart_height') || '220', 10);
 
   // Color constants
   const COLORS = {
@@ -123,7 +130,7 @@
     // 1. Main Candlestick Chart
     mainChart = LightweightCharts.createChart(mainContainer, {
       ...commonOptions,
-      height: 480
+      height: currentMainHeight
     });
 
     candlestickSeries = mainChart.addSeries(LightweightCharts.CandlestickSeries, {
@@ -143,10 +150,38 @@
 
     markersPrimitive = LightweightCharts.createSeriesMarkers(candlestickSeries, []);
 
+    // 7-Day Forecast Volatility Cone Series
+    predictionUpperSeries = mainChart.addSeries(LightweightCharts.LineSeries, {
+      color: 'rgba(244, 63, 94, 0.35)',
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false
+    });
+
+    predictionLowerSeries = mainChart.addSeries(LightweightCharts.LineSeries, {
+      color: 'rgba(244, 63, 94, 0.35)',
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false
+    });
+
+    predictionCenterSeries = mainChart.addSeries(LightweightCharts.LineSeries, {
+      color: '#f43f5e',
+      lineWidth: 2,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: true
+    });
+
     // 2. Subchart (Microstructure & Indicators)
     subChart = LightweightCharts.createChart(subContainer, {
       ...commonOptions,
-      height: 160
+      height: currentSubHeight
     });
 
     // Timeframe synchronization between mainChart and subChart
@@ -174,9 +209,9 @@
     const resizeObserver = new ResizeObserver(entries => {
       for (const entry of entries) {
         if (entry.target === mainContainer && mainChart) {
-          mainChart.resize(mainContainer.clientWidth, 480);
+          mainChart.resize(mainContainer.clientWidth, currentMainHeight);
         } else if (entry.target === subContainer && subChart) {
-          subChart.resize(subContainer.clientWidth, 160);
+          subChart.resize(subContainer.clientWidth, currentSubHeight);
         }
       }
     });
@@ -430,6 +465,79 @@
         }
       }
 
+      // Update Dynamic Targets & 7-Day Forecast Cone
+      if (activeTargetLines && activeTargetLines.length > 0) {
+        for (const line of activeTargetLines) {
+          candlestickSeries.removePriceLine(line);
+        }
+        activeTargetLines = [];
+      }
+
+      if (data.prediction) {
+        const pred = data.prediction;
+        const isBearish = pred.signal === 'BEARISH_RISK';
+        const isBullish = pred.signal === 'BULLISH_OPPORTUNITY';
+
+        // 1. Dynamic Target Price (TP)
+        if (pred.targetPrice > 0) {
+          const targetColor = isBearish ? '#f43f5e' : (isBullish ? '#10b981' : '#38bdf8');
+          const targetSign = pred.targetChangePercent > 0 ? '+' : '';
+          activeTargetLines.push(candlestickSeries.createPriceLine({
+            price: Number(pred.targetPrice),
+            color: targetColor,
+            lineWidth: 2,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: `🎯 7D Target: $${Number(pred.targetPrice).toLocaleString('en-US')} (${targetSign}${(Number(pred.targetChangePercent) * 100).toFixed(1)}%)`
+          }));
+        }
+
+        // 2. Invalidation Level (SL)
+        if (pred.invalidationPrice > 0) {
+          const invSign = pred.invalidationChangePercent > 0 ? '+' : '';
+          activeTargetLines.push(candlestickSeries.createPriceLine({
+            price: Number(pred.invalidationPrice),
+            color: 'rgba(244, 63, 94, 0.65)',
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Dotted,
+            axisLabelVisible: true,
+            title: `🛑 Invalidation (SL): $${Number(pred.invalidationPrice).toLocaleString('en-US')} (${invSign}${(Number(pred.invalidationChangePercent) * 100).toFixed(1)}%)`
+          }));
+        }
+
+        // 3. Render 7-Day Volatility Forecast Cone
+        if (predictionCenterSeries && predictionUpperSeries && predictionLowerSeries) {
+          if (showForecastCone && pred.projectionCone && pred.projectionCone.length > 0) {
+            const coneColor = isBearish ? '#f43f5e' : (isBullish ? '#10b981' : '#38bdf8');
+            const bandColor = isBearish ? 'rgba(244, 63, 94, 0.35)' : (isBullish ? 'rgba(16, 185, 129, 0.35)' : 'rgba(56, 189, 248, 0.35)');
+
+            predictionCenterSeries.applyOptions({
+              color: coneColor,
+              title: isBearish ? '7D Bearish Trajectory' : (isBullish ? '7D Bullish Trajectory' : '7D Expected Trajectory')
+            });
+            predictionUpperSeries.applyOptions({ color: bandColor });
+            predictionLowerSeries.applyOptions({ color: bandColor });
+
+            predictionCenterSeries.setData(pred.projectionCone.map(p => ({ time: p.time, value: Number(p.expectedPrice) })));
+            predictionUpperSeries.setData(pred.projectionCone.map(p => ({ time: p.time, value: Number(p.upperBand) })));
+            predictionLowerSeries.setData(pred.projectionCone.map(p => ({ time: p.time, value: Number(p.lowerBand) })));
+          } else {
+            predictionCenterSeries.setData([]);
+            predictionUpperSeries.setData([]);
+            predictionLowerSeries.setData([]);
+          }
+        }
+
+        // 4. Update Target Badge in Chart Header
+        const targetBadge = document.getElementById('badge-forecast-target');
+        if (targetBadge && pred.targetPrice > 0) {
+          targetBadge.style.display = 'inline-flex';
+          targetBadge.className = `target-badge ${isBearish ? 'bearish-target' : 'bullish-target'}`;
+          const sign = pred.targetChangePercent > 0 ? '+' : '';
+          targetBadge.innerHTML = `🎯 7D Target: $${Number(pred.targetPrice).toLocaleString('en-US')} (${sign}${(Number(pred.targetChangePercent) * 100).toFixed(1)}%)`;
+        }
+      }
+
       // Update Subchart
       renderSubchart();
 
@@ -447,6 +555,12 @@
           const sign = chg > 0 ? '+' : '';
           const isUp = chg >= 0;
           changeElem.innerHTML = `<span class="${isUp ? 'text-bullish' : 'text-bearish'}">${sign}${chg}% (24h)</span>`;
+        }
+
+        const rangeElem = document.getElementById('stat-btc-range');
+        if (rangeElem && data.candles && data.candles.length > 0) {
+          const latestCandle = data.candles[data.candles.length - 1];
+          rangeElem.innerText = `24h L: $${Number(latestCandle.low).toLocaleString('en-US', {maximumFractionDigits:0})} • H: $${Number(latestCandle.high).toLocaleString('en-US', {maximumFractionDigits:0})}`;
         }
 
         // Default legend to latest candle
@@ -745,6 +859,31 @@
         }
       }
 
+      // Update Targets Row in Hero Card
+      const targetsRow = document.getElementById('pred-targets-row');
+      const targetVal = document.getElementById('pred-target-val');
+      const invVal = document.getElementById('pred-invalidation-val');
+      const rrVal = document.getElementById('pred-rr-val');
+
+      if (targetsRow && pred.targetPrice > 0) {
+        targetsRow.style.display = 'flex';
+        const isBearish = pred.signal === 'BEARISH_RISK';
+        const targetSign = pred.targetChangePercent > 0 ? '+' : '';
+        const invSign = pred.invalidationChangePercent > 0 ? '+' : '';
+
+        if (targetVal) {
+          targetVal.innerText = `🎯 7D TP: $${Number(pred.targetPrice).toLocaleString('en-US')} (${targetSign}${(Number(pred.targetChangePercent) * 100).toFixed(1)}%)`;
+          targetVal.className = `target-pill ${isBearish ? 'bearish-side' : ''}`;
+        }
+        if (invVal) {
+          invVal.innerText = `🛑 SL: $${Number(pred.invalidationPrice).toLocaleString('en-US')} (${invSign}${(Number(pred.invalidationChangePercent) * 100).toFixed(1)}%)`;
+          invVal.className = `invalidation-pill ${!isBearish ? 'bullish-side' : ''}`;
+        }
+        if (rrVal) {
+          rrVal.innerText = `R:R ${Number(pred.riskRewardRatio).toFixed(1)}`;
+        }
+      }
+
       // Macro cards
       loadMacroCards();
 
@@ -971,6 +1110,18 @@
       });
     }
 
+    // Toggle 7D Forecast Cone Button
+    const btnToggleCone = document.getElementById('btn-toggle-cone');
+    if (btnToggleCone) {
+      btnToggleCone.addEventListener('click', () => {
+        showForecastCone = !showForecastCone;
+        btnToggleCone.classList.toggle('active', showForecastCone);
+        if (cachedChartData) {
+          renderChart(cachedChartData);
+        }
+      });
+    }
+
     // Telegram button
     const btnTelegram = document.getElementById('btn-telegram-test');
     if (btnTelegram) {
@@ -1001,12 +1152,136 @@
     if (btnBacktest) {
       btnBacktest.addEventListener('click', runBacktest);
     }
+
+    // Interactive Tooltips (Click / Tap toggle for mobile & desktop)
+    document.querySelectorAll('.tooltip-trigger').forEach(trigger => {
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isActive = trigger.classList.contains('active');
+        document.querySelectorAll('.tooltip-trigger.active').forEach(t => t.classList.remove('active'));
+        if (!isActive) trigger.classList.add('active');
+      });
+    });
+
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.tooltip-trigger.active').forEach(t => t.classList.remove('active'));
+    });
+  }
+
+  // Draggable Splitters for Resizing Charts Vertically
+  function setupChartResizers() {
+    const mainContainer = document.getElementById('main-chart');
+    const subContainer = document.getElementById('sub-chart');
+    const resizerMain = document.getElementById('resizer-main');
+    const resizerSub = document.getElementById('resizer-sub');
+    const btnExpand = document.getElementById('btn-chart-expand');
+    const chartCard = document.querySelector('.chart-card');
+
+    if (mainContainer) mainContainer.style.height = `${currentMainHeight}px`;
+    if (subContainer) subContainer.style.height = `${currentSubHeight}px`;
+
+    function makeDraggable(resizer, onDrag) {
+      if (!resizer) return;
+      let startY = 0;
+      let isDragging = false;
+
+      function onPointerDown(e) {
+        isDragging = true;
+        startY = e.clientY != null ? e.clientY : (e.touches && e.touches[0].clientY);
+        resizer.classList.add('dragging');
+        document.body.style.cursor = 'row-resize';
+        document.body.style.userSelect = 'none';
+
+        window.addEventListener('mousemove', onPointerMove);
+        window.addEventListener('mouseup', onPointerUp);
+        window.addEventListener('touchmove', onPointerMove, { passive: false });
+        window.addEventListener('touchend', onPointerUp);
+      }
+
+      function onPointerMove(e) {
+        if (!isDragging) return;
+        const clientY = e.clientY != null ? e.clientY : (e.touches && e.touches[0].clientY);
+        if (clientY == null) return;
+        const deltaY = clientY - startY;
+        startY = clientY;
+        onDrag(deltaY);
+      }
+
+      function onPointerUp() {
+        if (!isDragging) return;
+        isDragging = false;
+        resizer.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+
+        window.removeEventListener('mousemove', onPointerMove);
+        window.removeEventListener('mouseup', onPointerUp);
+        window.removeEventListener('touchmove', onPointerMove);
+        window.removeEventListener('touchend', onPointerUp);
+      }
+
+      resizer.addEventListener('mousedown', onPointerDown);
+      resizer.addEventListener('touchstart', onPointerDown, { passive: true });
+    }
+
+    // Main Chart Resizer (Drag up/down)
+    makeDraggable(resizerMain, (deltaY) => {
+      currentMainHeight = Math.max(340, Math.min(1200, currentMainHeight + deltaY));
+      if (mainContainer) mainContainer.style.height = `${currentMainHeight}px`;
+      if (mainChart) mainChart.resize(mainContainer.clientWidth, currentMainHeight);
+      localStorage.setItem('cp_main_chart_height', currentMainHeight);
+    });
+
+    // Subchart Resizer (Drag up/down)
+    makeDraggable(resizerSub, (deltaY) => {
+      currentSubHeight = Math.max(140, Math.min(600, currentSubHeight + deltaY));
+      if (subContainer) subContainer.style.height = `${currentSubHeight}px`;
+      if (subChart) subChart.resize(subContainer.clientWidth, currentSubHeight);
+      localStorage.setItem('cp_sub_chart_height', currentSubHeight);
+    });
+
+    // Double click to reset to comfortable defaults
+    if (resizerMain) {
+      resizerMain.addEventListener('dblclick', () => {
+        currentMainHeight = 560;
+        if (mainContainer) mainContainer.style.height = '560px';
+        if (mainChart) mainChart.resize(mainContainer.clientWidth, 560);
+        localStorage.setItem('cp_main_chart_height', '560');
+        showToast('Main chart height reset to 560px', 'info');
+      });
+    }
+
+    if (resizerSub) {
+      resizerSub.addEventListener('dblclick', () => {
+        currentSubHeight = 220;
+        if (subContainer) subContainer.style.height = '220px';
+        if (subChart) subChart.resize(subContainer.clientWidth, 220);
+        localStorage.setItem('cp_sub_chart_height', '220');
+        showToast('Subchart height reset to 220px', 'info');
+      });
+    }
+
+    // Fullscreen / Expanded Mode Toggle
+    if (btnExpand && chartCard) {
+      btnExpand.addEventListener('click', () => {
+        chartCard.classList.toggle('fullscreen-mode');
+        const isFull = chartCard.classList.contains('fullscreen-mode');
+        btnExpand.innerHTML = isFull ? '✕' : '⛶';
+        btnExpand.title = isFull ? 'Exit Expanded View' : 'Toggle Fullscreen / Expanded View';
+
+        setTimeout(() => {
+          if (mainChart && mainContainer) mainChart.resize(mainContainer.clientWidth, currentMainHeight);
+          if (subChart && subContainer) subChart.resize(subContainer.clientWidth, currentSubHeight);
+        }, 100);
+      });
+    }
   }
 
   // Application Entry Point
   window.addEventListener('DOMContentLoaded', async () => {
     initCharts();
     setupEvents();
+    setupChartResizers();
 
     await loadChartData(currentDays);
     await loadTodayPrediction();

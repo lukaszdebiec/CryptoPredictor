@@ -56,7 +56,15 @@
         <div>
           <div class="card-label">
             <span>ML Signal (FastTree Model)</span>
-            <span id="label-prediction-date" style="font-family: var(--font-mono); font-size: 0.72rem;">--</span>
+            <div style="display: flex; gap: 0.45rem; align-items: center;">
+              <span id="label-prediction-date" style="font-family: var(--font-mono); font-size: 0.72rem;">--</span>
+              <span class="tooltip-trigger" tabindex="0">?
+                <span class="tooltip-content">
+                  <strong>ML Signal (FastTree Model)</strong>
+                  7-day probabilistic forward forecast from ML.NET FastTree GBDT. Predicts if Bitcoin will establish a local accumulation bottom and rally (+2% to +8%).
+                </span>
+              </span>
+            </div>
           </div>
           <div class="signal-headline">
             <span id="badge-signal" class="signal-badge neutral">LOADING...</span>
@@ -71,58 +79,148 @@
           <div class="prob-bar-track">
             <div id="prob-bar-fill" class="prob-bar-fill" style="width: 50%; background: var(--neutral-blue);"></div>
           </div>
+          <div id="pred-targets-row" class="pred-targets-row" style="display: none;">
+            <span id="pred-target-val" class="target-pill">🎯 TP: $--</span>
+            <span id="pred-invalidation-val" class="invalidation-pill">🛑 SL: $--</span>
+            <span id="pred-rr-val" class="rr-pill">R:R --</span>
+          </div>
         </div>
       </div>
 
       <!-- 2. BTC Price -->
       <div class="card">
-        <div class="card-label">Bitcoin Close (Spot)</div>
-        <div id="stat-btc-price" class="stat-value">$---,---</div>
-        <div id="stat-btc-change" class="stat-subtext">
-          <span>--% (24h)</span>
+        <div>
+          <div class="card-label">
+            <span>Bitcoin Close (Spot)</span>
+            <span class="tooltip-trigger" tabindex="0">?
+              <span class="tooltip-content">
+                <strong>Bitcoin Close (Spot)</strong>
+                Real-time spot closing price, 24h percentage return, and intraday low/high range from Binance.
+              </span>
+            </span>
+          </div>
+          <div id="stat-btc-price" class="stat-value">$---,---</div>
+        </div>
+        <div>
+          <div id="stat-btc-change" class="stat-subtext">
+            <span>--% (24h)</span>
+          </div>
+          <div id="stat-btc-range" class="card-extra-stat">24h L: $-- • H: $--</div>
         </div>
       </div>
 
       <!-- 3. Fibonacci Golden Pocket (30d) -->
       <div class="card">
-        <div class="card-label">Fibonacci Golden Pocket</div>
-        <div id="stat-fib-ratio" class="stat-value">--%</div>
-        <div id="stat-fib-desc" class="stat-subtext">Pocket: $-- - $--</div>
+        <div>
+          <div class="card-label">
+            <span>Fibonacci Golden Pocket</span>
+            <span class="tooltip-trigger" tabindex="0">?
+              <span class="tooltip-content">
+                <strong>Fibonacci Golden Pocket</strong>
+                30-day swing retracement ratio. The 0.618 - 0.650 zone ('Golden Pocket') is a high-probability institutional reaction and reversal area.
+              </span>
+            </span>
+          </div>
+          <div id="stat-fib-ratio" class="stat-value">--%</div>
+        </div>
+        <div>
+          <div id="stat-fib-desc" class="stat-subtext">Pocket: $-- - $--</div>
+        </div>
       </div>
 
       <!-- 4. Wave Dynamics (KER 10d) -->
       <div class="card">
-        <div class="card-label">Wave Dynamics (KER 10d)</div>
-        <div id="stat-ker-val" class="stat-value">--</div>
-        <div id="stat-ker-desc" class="stat-subtext">Wave Regime: --</div>
+        <div>
+          <div class="card-label">
+            <span>Wave Dynamics (KER 10d)</span>
+            <span class="tooltip-trigger" tabindex="0">?
+              <span class="tooltip-content">
+                <strong>Wave Dynamics (KER 10d)</strong>
+                Kaufman Efficiency Ratio (10d). Values >0.55 indicate strong Elliott Wave impulse momentum (Wave 3/5), while &lt;0.25 indicate corrective ABC chop.
+              </span>
+            </span>
+          </div>
+          <div id="stat-ker-val" class="stat-value">--</div>
+        </div>
+        <div>
+          <div id="stat-ker-desc" class="stat-subtext">Wave Regime: --</div>
+        </div>
       </div>
 
       <!-- 5. Fear & Greed -->
       <div class="card">
-        <div class="card-label">Fear & Greed Index</div>
-        <div id="stat-fng-val" class="stat-value">--</div>
-        <div id="stat-fng-desc" class="stat-subtext">Sentiment: --</div>
+        <div>
+          <div class="card-label">
+            <span>Fear & Greed Index</span>
+            <span class="tooltip-trigger" tabindex="0">?
+              <span class="tooltip-content">
+                <strong>Fear & Greed Index</strong>
+                Multi-factor market sentiment oscillator (0-100). Extreme Fear (&lt;25) historically marks accumulation bottoms, while Extreme Greed (&gt;75) signals top risk.
+              </span>
+            </span>
+          </div>
+          <div id="stat-fng-val" class="stat-value">--</div>
+        </div>
+        <div>
+          <div id="stat-fng-desc" class="stat-subtext">Sentiment: --</div>
+        </div>
       </div>
 
       <!-- 6. Funding Z-Score 30d -->
       <div class="card">
-        <div class="card-label">Funding Rate Z-Score</div>
-        <div id="stat-funding-z" class="stat-value">--</div>
-        <div id="stat-funding-desc" class="stat-subtext">Market Leverage: Neutral</div>
+        <div>
+          <div class="card-label">
+            <span>Funding Rate Z-Score</span>
+            <span class="tooltip-trigger" tabindex="0">?
+              <span class="tooltip-content">
+                <strong>Funding Rate Z-Score</strong>
+                Statistical 30-day Z-score of perpetual futures funding rates. High positive scores warn of overheated long leverage; negative scores signal short-squeeze potential.
+              </span>
+            </span>
+          </div>
+          <div id="stat-funding-z" class="stat-value">--</div>
+        </div>
+        <div>
+          <div id="stat-funding-desc" class="stat-subtext">Market Leverage: Neutral</div>
+        </div>
       </div>
 
       <!-- 7. Spot ETF 7d Net Flow -->
       <div class="card">
-        <div class="card-label">ETF Net Flow (7d Cumulative)</div>
-        <div id="stat-etf-7d" class="stat-value">$--M</div>
-        <div id="stat-etf-daily" class="stat-subtext">Latest Session: $--M</div>
+        <div>
+          <div class="card-label">
+            <span>ETF Net Flow (7d Cumulative)</span>
+            <span class="tooltip-trigger" tabindex="0">?
+              <span class="tooltip-content">
+                <strong>ETF Net Flow (7d Cumulative)</strong>
+                7-day rolling net institutional cash inflows into US Spot Bitcoin ETFs (IBIT, FBTC, etc.), measuring persistent Wall Street demand.
+              </span>
+            </span>
+          </div>
+          <div id="stat-etf-7d" class="stat-value">$--M</div>
+        </div>
+        <div>
+          <div id="stat-etf-daily" class="stat-subtext">Latest Session: $--M</div>
+        </div>
       </div>
 
       <!-- 8. Global Macro (DXY & US10Y) -->
       <div class="card">
-        <div class="card-label">Global Macro (DXY & 10Y)</div>
-        <div id="stat-macro-val" class="stat-value">--</div>
-        <div id="stat-macro-desc" class="stat-subtext">US10Y: --% | S&P: --</div>
+        <div>
+          <div class="card-label">
+            <span>Global Macro (DXY & 10Y)</span>
+            <span class="tooltip-trigger" tabindex="0">?
+              <span class="tooltip-content">
+                <strong>Global Macro (DXY & 10Y)</strong>
+                Macro liquidity benchmarks: US Dollar Index (DXY), 10-Year Treasury Yields (^TNX), and S&P 500. A weaker dollar and lower yields expand crypto liquidity.
+              </span>
+            </span>
+          </div>
+          <div id="stat-macro-val" class="stat-value">--</div>
+        </div>
+        <div>
+          <div id="stat-macro-desc" class="stat-subtext">US10Y: --% | S&P: --</div>
+        </div>
       </div>
     </section>
 
@@ -136,8 +234,10 @@
               <span>BTC/USDT</span>
               <span style="font-size: 0.75rem; color: var(--text-dim); font-weight: 400;">Daily Candles + ML Turning Points</span>
             </div>
-            <div id="liquidity-badge-container" style="display: flex; gap: 0.5rem; align-items: center;">
+            <div id="liquidity-badge-container" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
               <span id="badge-liq-magnet" class="liq-badge" style="display: none;">Liq Magnet: --</span>
+              <span id="badge-forecast-target" class="target-badge" style="display: none;">Target: --</span>
+              <button id="btn-toggle-cone" class="cone-toggle-btn active" title="Toggle 7-Day Forecast Volatility Cone">📐 7D Forecast Cone</button>
             </div>
           </div>
 
@@ -147,6 +247,7 @@
             <button class="timeframe-btn active" data-days="180">180D</button>
             <button class="timeframe-btn" data-days="365">1Y</button>
             <button class="timeframe-btn" data-days="0">ALL</button>
+            <button id="btn-chart-expand" class="size-btn" title="Toggle Fullscreen / Expanded View">⛶</button>
           </div>
         </div>
 
@@ -163,6 +264,11 @@
         <!-- TradingView Candlestick Canvas -->
         <div id="main-chart"></div>
 
+        <!-- Draggable Resizer for Main Chart -->
+        <div class="chart-resizer" id="resizer-main" title="Drag vertically to resize Main Candlestick Chart (Double-click to reset)">
+          <div class="resizer-handle"></div>
+        </div>
+
         <!-- Synchronized Subchart (Indicators) -->
         <div class="subchart-toolbar">
           <div class="subchart-title">Microstructure & Macro Indicators</div>
@@ -177,6 +283,11 @@
         </div>
 
         <div id="sub-chart"></div>
+
+        <!-- Draggable Resizer for Subchart -->
+        <div class="chart-resizer" id="resizer-sub" title="Drag vertically to resize Indicators Subchart (Double-click to reset)">
+          <div class="resizer-handle"></div>
+        </div>
       </div>
     </section>
 

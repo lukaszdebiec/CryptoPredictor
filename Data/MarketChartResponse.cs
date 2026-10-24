@@ -1,3 +1,5 @@
+using CryptoPredictor.Prediction;
+
 namespace CryptoPredictor.Data;
 
 public sealed record MarketChartResponse
@@ -8,7 +10,24 @@ public sealed record MarketChartResponse
     public required ChartSummary Summary { get; init; }
     public FibLevelsSummary? Fibonacci { get; init; }
     public LiquiditySummary? Liquidity { get; init; }
+    public PredictionSummary? Prediction { get; init; }
 }
+
+public sealed record PredictionSummary
+{
+    public string Signal { get; init; } = "";
+    public decimal BullishProbability { get; init; }
+    public string MarketRegime { get; init; } = "";
+    public string Confidence { get; init; } = "";
+    public decimal TargetPrice { get; init; }
+    public decimal InvalidationPrice { get; init; }
+    public decimal TargetChangePercent { get; init; }
+    public decimal InvalidationChangePercent { get; init; }
+    public decimal RiskRewardRatio { get; init; }
+    public int HorizonDays { get; init; } = 7;
+    public IReadOnlyList<PredictionConePoint> ProjectionCone { get; init; } = Array.Empty<PredictionConePoint>();
+}
+
 
 public sealed record CandleDataPoint
 {

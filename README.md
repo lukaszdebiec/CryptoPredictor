@@ -103,9 +103,16 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] Detekcja wybicia płynności (Liquidity Sweeps / Stop Hunts / SFPs): identyfikacja sytuacji, gdy cena przebija kluczowe dołki/szczyty, czyści klastry zleceń stop-loss i gwałtownie powraca do zakresu (reclaim).
 - [x] Nowe cechy ilościowe w pipeline ML: `DistToLowerLiquidityWall`, `DistToUpperLiquidityWall`, `IsLongLiquiditySwept` i `IsShortLiquiditySwept` zasilające model FastTree ML.NET, wagi heurystyczne oraz Key Drivers.
 - [x] Rozszerzenie API (`/api/marketdata/chart`) o obiekt `LiquiditySummary` (poziomy ścian 50x/25x, dystanse procentowe, strona dominująca) oraz punkty historyczne odległości do ścian.
-- [x] Dynamiczna wizualizacja na TradingView Lightweight Charts: 4 linie cenowe likwidacji (Short Liq 25x/50x w kolorze pomarańczowo-różowym, Long Liq 50x/25x w kolorze błękitnym/morskim), interaktywny badge magnesu płynności oraz dedykowany subwykres z progami ±2%.
+
+### Priorytet 11: Wizualny Stożek Projekcji 7D, Dynamiczne Targety TP/SL, Płynne Skalowanie Wykresów & Siatka 2x4 z Tooltipami ✅
+- [x] **Stożek Projekcji Zmienności (7-Day Volatility Forecast Cone):** Dorysowanie na wykresie TradingView 7-dniowej trajektorii modelu FastTree wraz z dynamicznym przedziałem zmienności $\pm \sigma \cdot \sqrt{t}$ opartym na indeksie Deribit DVOL i zrealizowanej zmienności 7d. Przycisk w nagłówku wykresu umożliwia wygodne włączanie/wyłączanie stożka.
+- [x] **Dynamiczne Targety Cenowe (Take-Profit / Stop-Loss / Risk-Reward Ratio):** Automatyczne wyznaczanie poziomów realizacji zysku (TP) i obrony kapitału (SL) sprzężonych z prawdopodobieństwem modelu oraz najbliższymi ścianami likwidacji; pigułki z targetami w karcie sygnału ML oraz na skali cenowej wykresu.
+- [x] **Płynne Skalowanie Wykresów w Pionie (Draggable Resizers) & Fullscreen:** Interaktywne poziome uchwyty (splittery) z możliwością przeciągania góra-dół, pamięcią rozmiaru w `localStorage` (zapamiętywanie preferencji użytkownika) oraz trybem pełnoekranowym (`⛶`).
+- [x] **Reorganizacja Metryk w Siatkę 2x4:** Podział górnych kafelków na dwa rzędy po cztery elementy (eliminacja pustej przestrzeni i ucinania długich liczb, dodanie zakresu 24h Low/High).
+- [x] **Interaktywne Tooltipy Informacyjne `?`:** Dedykowane okienka wyjaśniające znaczenie każdego wskaźnika (m.in. dynamika fal KER, strefa Golden Pocket, Z-score fundingu, przepływy ETF, makro TradFi) po najechaniu myszą lub kliknięciu.
 
 ---
+
 
 
 ## 🚀 Jak uruchomić projekt

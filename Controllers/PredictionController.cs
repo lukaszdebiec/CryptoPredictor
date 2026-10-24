@@ -71,7 +71,7 @@ public class PredictionController : ControllerBase
         if (!forceRefresh)
         {
             var saved = await _storage.GetLatestPredictionAsync(ct);
-            if (saved != null)
+            if (saved != null && saved.ProjectionCone != null && saved.ProjectionCone.Count > 0 && saved.TargetPrice > 0)
             {
                 return Ok(saved);
             }

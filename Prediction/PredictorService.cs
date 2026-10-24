@@ -278,6 +278,17 @@ public class PredictorService : IPredictorService
             confidence = "Neutral";
         }
 
+        var (targetPrice, invalidationPrice, targetPct, invalidationPct, rrRatio, cone) =
+            CalculateProjectionAndTargets(
+                todayMarket.BtcClose,
+                todayFeatures.Date,
+                signal,
+                Math.Round((decimal)probability, 4),
+                todayMarket.BtcDvol,
+                todayFeatures.RealizedVolatility30d,
+                todayFeatures.DistToUpperLiquidityWall,
+                todayFeatures.DistToLowerLiquidityWall);
+
         return new MarketPrediction
         {
             Date = todayFeatures.Date,
@@ -286,8 +297,125 @@ public class PredictorService : IPredictorService
             BullishProbability = Math.Round((decimal)probability, 4),
             MarketRegime = regime,
             Confidence = confidence,
-            KeyDrivers = drivers
+            KeyDrivers = drivers,
+            TargetPrice = targetPrice,
+            InvalidationPrice = invalidationPrice,
+            TargetChangePercent = targetPct,
+            InvalidationChangePercent = invalidationPct,
+            RiskRewardRatio = rrRatio,
+            HorizonDays = 7,
+            ProjectionCone = cone
         };
+    }
+
+    public static (decimal targetPrice, decimal invalidationPrice, decimal targetPct, decimal invalidationPct, decimal rrRatio, IReadOnlyList<PredictionConePoint> cone) CalculateProjectionAndTargets(
+        decimal btcClose,
+        DateOnly todayDate,
+        string signal,
+        decimal bullishProbability,
+        decimal? btcDvol,
+        decimal realizedVol30d,
+        decimal distToUpperLiqWall,
+        decimal distToLowerLiqWall)
+    {
+        // 1. Determine annualized volatility
+        decimal volAnnual;
+        if (btcDvol.HasValue && btcDvol.Value > 10m)
+        {
+            volAnnual = btcDvol.Value / 100m;
+        }
+        else if (realizedVol30d > 0.005m)
+        {
+            volAnnual = realizedVol30d * (decimal)Math.Sqrt(365);
+        }
+        else
+        {
+            volAnnual = 0.50m;
+        }
+
+        // Daily standard deviation
+        decimal volDaily = volAnnual / (decimal)Math.Sqrt(365);
+
+        // 2. Determine target & invalidation percentages based on signal & liquidity walls
+        decimal targetPct;
+        decimal invalidationPct;
+        decimal driftDaily;
+
+        if (signal == "BULLISH_OPPORTUNITY")
+        {
+            // Base target: +8% (or Upper Liquidation Wall if 5%-14% away)
+            targetPct = (distToUpperLiqWall >= 5m && distToUpperLiqWall <= 14m)
+                ? distToUpperLiqWall / 100m
+                : 0.08m;
+            // Invalidation: -4% (or just below Lower Liquidation Wall)
+            invalidationPct = (distToLowerLiqWall >= 2.5m && distToLowerLiqWall <= 6m)
+                ? (distToLowerLiqWall + 0.5m) / 100m
+                : 0.04m;
+
+            driftDaily = targetPct / 7m;
+        }
+        else if (signal == "BEARISH_RISK")
+        {
+            // Downside target: -8% (or Lower Liquidation Wall if 4%-14% away)
+            targetPct = (distToLowerLiqWall >= 4m && distToLowerLiqWall <= 14m)
+                ? distToLowerLiqWall / 100m
+                : 0.08m;
+            // Upside invalidation: +4% (or just above Upper Liquidation Wall)
+            invalidationPct = (distToUpperLiqWall >= 2.5m && distToUpperLiqWall <= 6m)
+                ? (distToUpperLiqWall + 0.5m) / 100m
+                : 0.04m;
+
+            driftDaily = -targetPct / 7m;
+        }
+        else
+        {
+            targetPct = 0.04m;
+            invalidationPct = 0.04m;
+            driftDaily = (bullishProbability - 0.50m) * 0.04m / 7m;
+        }
+
+        decimal targetPrice;
+        decimal invalidationPrice;
+        decimal signedTargetPct;
+        decimal signedInvalidationPct;
+
+        if (signal == "BEARISH_RISK")
+        {
+            targetPrice = Math.Round(btcClose * (1m - targetPct), 2);
+            invalidationPrice = Math.Round(btcClose * (1m + invalidationPct), 2);
+            signedTargetPct = -targetPct;
+            signedInvalidationPct = invalidationPct;
+        }
+        else
+        {
+            targetPrice = Math.Round(btcClose * (1m + targetPct), 2);
+            invalidationPrice = Math.Round(btcClose * (1m - invalidationPct), 2);
+            signedTargetPct = targetPct;
+            signedInvalidationPct = -invalidationPct;
+        }
+
+        decimal rrRatio = invalidationPct > 0m ? Math.Round(targetPct / invalidationPct, 2) : 2.0m;
+
+        // 3. Generate 7-day prediction cone points (Day 0 to Day 7)
+        var cone = new List<PredictionConePoint>();
+        for (int t = 0; t <= 7; t++)
+        {
+            var date = todayDate.AddDays(t);
+            decimal expected = btcClose * (1m + driftDaily * t);
+            decimal sigmaT = volDaily * (decimal)Math.Sqrt(t);
+            decimal upper = expected * (1m + sigmaT);
+            decimal lower = expected * (1m - sigmaT);
+
+            cone.Add(new PredictionConePoint
+            {
+                Time = date.ToString("yyyy-MM-dd"),
+                ExpectedPrice = Math.Round(expected, 2),
+                UpperBand = Math.Round(upper, 2),
+                LowerBand = Math.Round(lower, 2)
+            });
+        }
+
+        return (targetPrice, invalidationPrice, signedTargetPct, signedInvalidationPct, rrRatio, cone);
     }
 
     private static float CalculateHeuristicProbability(DailyFeatures feat, DailyMarketData market)
