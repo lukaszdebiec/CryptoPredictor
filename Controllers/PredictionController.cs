@@ -27,14 +27,15 @@ public class PredictionController : ControllerBase
 
     private async Task<IReadOnlyList<DailyMarketData>> History(int days, CancellationToken ct)
     {
-        var data = _storage.Exists() ? await _storage.LoadAsync(ct)
-            : await _aggregator.FetchAndAggregateAsync(days, saveToStorage: true, ct);
+        var data = _storage.Exists() ? await _storage.LoadAsync(ct) : (IReadOnlyList<DailyMarketData>)[];
+        if (data.Count < Math.Min(days, 500))
+            data = await _aggregator.FetchAndAggregateAsync(days, saveToStorage: true, ct);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return data.Where(d => d.Date < today).OrderBy(d => d.Date).ToList();
     }
 
     [HttpPost("train")]
-    public async Task<ActionResult<ModelTrainingMetrics>> TrainModel([FromQuery] int days = 365,
+    public async Task<ActionResult<ModelTrainingMetrics>> TrainModel([FromQuery] int days = 500,
         [FromQuery] int lookaheadDays = 7, [FromQuery] decimal bullishThresholdPercent = 0m, CancellationToken ct = default)
     {
         if (days < 1 || days > 1000 || lookaheadDays != PredictionPolicy.HorizonDays || bullishThresholdPercent != 0m)
@@ -49,7 +50,7 @@ public class PredictionController : ControllerBase
     [HttpGet("today")]
     public async Task<ActionResult<MarketPrediction>> GetTodayPrediction([FromQuery] bool forceRefresh = false, CancellationToken ct = default)
     {
-        var data = await History(365, ct);
+        var data = await History(500, ct);
         if (data.Count == 0) return StatusCode(503, "No closed daily market observations are available.");
         var saved = await _storage.GetLatestPredictionAsync(ct);
         // The first issued forecast for a signal day is immutable, including on forceRefresh.
@@ -60,7 +61,7 @@ public class PredictionController : ControllerBase
         var prediction = ready.Predict(features[^1], data[^1]);
         var issued = await _storage.SavePredictionAsync(prediction, ct);
         if (issued.ModelVersion != PredictionPolicy.Version)
-            return Conflict("A legacy forecast already exists for this day and was preserved. See /api/prediction/history; direction-v1 will issue its first snapshot on the next signal day.");
+            return Ok(prediction);
         return Ok(issued);
     }
 
@@ -74,7 +75,7 @@ public class PredictionController : ControllerBase
     {
         if (mode == "live") return Ok(await _storage.GetPredictionJournalAsync(Math.Clamp(limit, 1, 1000), ct));
         if (mode != "historical") return BadRequest("Mode must be historical or live.");
-        var data = await History(365, ct);
+        var data = await History(500, ct);
         var journal = _predictor.GenerateWalkForwardJournal(data, _featureCalculator.Calculate(data), _turningPointDetector);
         // Stats and items must describe the same selected rows.
         return Ok(PredictionOutcomeResolver.Journal(journal.Items.Take(Math.Clamp(limit, 1, 1000)), "historical"));

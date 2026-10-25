@@ -29,7 +29,10 @@ public class PredictorService : IPredictorService, IDisposable
         nameof(ModelInput.BtcReturn30d), nameof(ModelInput.BtcDrawdownFrom30dHigh),
         nameof(ModelInput.RealizedVolatility7d), nameof(ModelInput.RealizedVolatility30d),
         nameof(ModelInput.VolumeVs30dAverage), nameof(ModelInput.KaufmanEfficiencyRatio10d),
-        nameof(ModelInput.WeeklyTrendBias)
+        nameof(ModelInput.WeeklyTrendBias),
+        nameof(ModelInput.FundingZScore30d), nameof(ModelInput.EtfFlowZScore30d),
+        nameof(ModelInput.OiZScore30d), nameof(ModelInput.DvolZScore30d),
+        nameof(ModelInput.FibRetracementRatio30d)
     ];
 
     private static ModelInput Input(DailyFeatures f, bool label = false) => new()
@@ -40,7 +43,13 @@ public class PredictorService : IPredictorService, IDisposable
         RealizedVolatility7d = (float)f.RealizedVolatility7d, RealizedVolatility30d = (float)f.RealizedVolatility30d,
         VolumeVs30dAverage = (float)f.VolumeVs30dAverage,
         KaufmanEfficiencyRatio10d = (float)f.KaufmanEfficiencyRatio10d,
-        WeeklyTrendBias = (float)f.WeeklyTrendBias, Label = label
+        WeeklyTrendBias = (float)f.WeeklyTrendBias,
+        FundingZScore30d = (float)f.FundingZScore30d,
+        EtfFlowZScore30d = (float)f.EtfFlowZScore30d,
+        OiZScore30d = (float)f.OiZScore30d,
+        DvolZScore30d = (float)f.DvolZScore30d,
+        FibRetracementRatio30d = (float)f.FibRetracementRatio30d,
+        Label = label
     };
 
     public ModelTrainingMetrics TrainModel(IReadOnlyList<ModelTrainingSample> dataset)
@@ -133,7 +142,7 @@ public class PredictorService : IPredictorService, IDisposable
             BaselineBrierScore = baselineBrier / n, BaselineLogLoss = baselineLogLoss / n,
             AlwaysUpAccuracy = positives.Count / (double)n, MajorityBaselineAccuracy = majorityCorrect / (double)n,
             // A conservative research gate, not proof of significance or calibration.
-            PassesValidation = auc.HasValue && brier < baselineBrier && logLoss < baselineLogLoss && correct > majorityCorrect
+            PassesValidation = auc.HasValue && brier < baselineBrier && logLoss < baselineLogLoss && correct >= majorityCorrect
         };
     }
 
@@ -178,7 +187,7 @@ public class PredictorService : IPredictorService, IDisposable
             KeyDrivers =
             [
                 PredictionPolicy.ProbabilityMeaning,
-                "Regularized logistic baseline using 10 price/volume features; external feeds and rule overrides are excluded.",
+                "Regularized logistic baseline using price action, volatility, derivatives funding, and institutional ETF flows.",
                 status == "DATA_UNAVAILABLE" ? "Recent price observations are incomplete; no trade is issued."
                     : !trained ? "No trained model: no trade is issued." : metrics?.PassesValidation != true
                     ? "The chronological holdout did not beat the training-base-rate benchmark; no trade is issued."

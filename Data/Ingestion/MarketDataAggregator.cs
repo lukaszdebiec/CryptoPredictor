@@ -48,7 +48,7 @@ public class MarketDataAggregator : IMarketDataAggregator
         var coinbaseTask = _coinbaseDataService.GetDailyClosePricesAsync(ct);
         var dvolTask = _deribitDataService.GetDailyDvolHistoryAsync(startDate, endDate, ct);
         var etfTask = _etfDataService.GetDailyEtfNetFlowsAsync(ct);
-        var macroTask = _macroDataService.GetMacroHistoryAsync("1y", ct);
+        var macroTask = _macroDataService.GetMacroHistoryAsync("2y", ct);
 
         await Task.WhenAll(klinesTask, fundingTask, oiTask, fngTask, coinbaseTask, dvolTask, etfTask, macroTask);
 
