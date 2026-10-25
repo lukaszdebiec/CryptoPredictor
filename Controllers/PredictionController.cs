@@ -114,13 +114,38 @@ public class PredictionController : ControllerBase
     }
 
     /// <summary>
-    /// Returns the live Forward-Testing Prediction Journal with automated 7-day outcome resolution (TP Hit, SL Hit, Expired) and performance stats.
+    /// Returns the Prediction Journal with automated 7-day outcome resolution (TP Hit, SL Hit, Expired) and performance stats.
+    /// Supports mode="historical" (expanding-window walk-forward ledger across ~180 days) and mode="live" (forward-testing journal).
     /// </summary>
     [HttpGet("journal")]
-    public async Task<ActionResult<PredictionJournalResponse>> GetPredictionJournal([FromQuery] int limit = 50, CancellationToken ct = default)
+    public async Task<ActionResult<PredictionJournalResponse>> GetPredictionJournal(
+        [FromQuery] string mode = "historical",
+        [FromQuery] int limit = 250,
+        CancellationToken ct = default)
     {
-        var journal = await _storage.GetPredictionJournalAsync(limit, ct);
-        return Ok(journal);
+        if (string.Equals(mode, "live", StringComparison.OrdinalIgnoreCase))
+        {
+            var liveJournal = await _storage.GetPredictionJournalAsync(limit, ct);
+            return Ok(liveJournal with { Mode = "live" });
+        }
+
+        // Historical Walk-Forward Ledger
+        var marketData = _storage.Exists()
+            ? await _storage.LoadAsync(ct)
+            : await _aggregator.FetchAndAggregateAsync(365, saveToStorage: true, ct);
+
+        var features = _featureCalculator.Calculate(marketData);
+        var historicalJournal = _predictor.GenerateWalkForwardJournal(marketData, features, _turningPointDetector);
+
+        if (limit > 0 && historicalJournal.Items.Count > limit)
+        {
+            historicalJournal = historicalJournal with
+            {
+                Items = historicalJournal.Items.Take(limit).ToList()
+            };
+        }
+
+        return Ok(historicalJournal);
     }
 
 

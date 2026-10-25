@@ -1111,132 +1111,224 @@
     }
   }
 
-  // Load Historical Predictions Journal & Live Accuracy Metrics into Table
-  async function loadHistoricalPredictions() {
+  // ==========================================================================
+  // Priority 16: Historical Prediction Journal & Walk-Forward Trade Ledger
+  // ==========================================================================
+
+  let currentJournalMode = 'historical'; // 'historical' | 'live'
+  let currentJournalFilter = 'all'; // 'all' | 'tp' | 'sl' | 'expired' | 'pending' | 'bull' | 'bear'
+  let cachedJournalItems = [];
+  let cachedJournalStats = null;
+
+  async function loadHistoricalPredictions(mode) {
+    if (mode) currentJournalMode = mode;
+    const tbody = document.getElementById('history-table-body');
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-dim);"><span class="pulse-dot"></span> Wczytywanie i przeliczanie dziennika (${currentJournalMode === 'historical' ? 'Walk-Forward Ledger ~180D' : 'Tryb Live'})...</td></tr>`;
+    }
+
     try {
-      const res = await fetch('/api/prediction/journal?limit=30');
-      if (!res.ok) return;
+      const res = await fetch(`/api/prediction/journal?mode=${encodeURIComponent(currentJournalMode)}&limit=250`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data = await res.json();
-      const stats = data.stats;
-      const items = data.items;
-      const tbody = document.getElementById('history-table-body');
-      if (!tbody) return;
+      cachedJournalStats = data.stats;
+      cachedJournalItems = data.items || [];
 
-      // Populate Live KPI Stats Bar
-      if (stats) {
-        const elWinRate = document.getElementById('j-stat-winrate');
-        const elTargetRate = document.getElementById('j-stat-targetrate');
-        const elProfitFactor = document.getElementById('j-stat-profitfactor');
-        const elCumPnl = document.getElementById('j-stat-cumpnl');
-        const elCounts = document.getElementById('j-stat-counts');
+      // Update KPI stats cards
+      updateJournalStatsUI(cachedJournalStats);
 
-        if (elWinRate) {
-          elWinRate.innerText = stats.resolvedPredictions > 0 ? `${Number(stats.winRatePercent).toFixed(1)}%` : '--%';
-          elWinRate.style.color = stats.winRatePercent >= 55 ? '#34d399' : (stats.winRatePercent > 0 ? '#fb7185' : 'var(--text-main)');
-        }
-        if (elTargetRate) {
-          elTargetRate.innerText = stats.resolvedPredictions > 0 ? `${Number(stats.targetHitRatePercent).toFixed(1)}%` : '--%';
-          elTargetRate.style.color = stats.targetHitRatePercent >= 40 ? '#34d399' : 'var(--text-main)';
-        }
-        if (elProfitFactor) {
-          elProfitFactor.innerText = stats.resolvedPredictions > 0 ? Number(stats.profitFactor).toFixed(2) : '--';
-          elProfitFactor.style.color = stats.profitFactor >= 1.5 ? '#34d399' : (stats.profitFactor < 1.0 ? '#fb7185' : 'var(--text-main)');
-        }
-        if (elCumPnl) {
-          const pnlVal = Number(stats.cumulativeReturnPercent);
-          elCumPnl.innerText = stats.resolvedPredictions > 0 ? `${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(1)}%` : '--%';
-          elCumPnl.style.color = pnlVal > 0 ? '#34d399' : (pnlVal < 0 ? '#fb7185' : 'var(--text-main)');
-        }
-        if (elCounts) {
-          elCounts.innerText = `${stats.resolvedPredictions} / ${stats.pendingPredictions}`;
-        }
-      }
+      // Update filter counts
+      updateJournalFilterCounts(cachedJournalItems);
 
-      if (!items || items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2rem; color: var(--text-dim);">No recorded predictions yet. The first will be recorded after the daily 00:05 UTC cycle.</td></tr>`;
-        return;
-      }
-
-      tbody.innerHTML = items.map(item => {
-        let badgeClass = 'neutral';
-        if (item.signal === 'BULLISH_OPPORTUNITY') badgeClass = 'bullish';
-        if (item.signal === 'BEARISH_RISK') badgeClass = 'bearish';
-
-        const priceStr = formatMoney(item.btcClose);
-
-        // Target & Invalidation compact cell
-        const tpSign = item.targetChangePercent >= 0 ? '+' : '';
-        const slSign = item.invalidationChangePercent >= 0 ? '+' : '';
-        const tpStr = `TP: $${Number(item.targetPrice).toLocaleString('en-US')} (${tpSign}${(item.targetChangePercent * 100).toFixed(1)}%)`;
-        const slStr = `SL: $${Number(item.invalidationPrice).toLocaleString('en-US')} (${slSign}${(item.invalidationChangePercent * 100).toFixed(1)}%)`;
-        const targetsHtml = `
-          <div class="targets-cell">
-            <span class="tp-text">${escapeHtml(tpStr)}</span>
-            <span class="sl-text">${escapeHtml(slStr)}</span>
-          </div>
-        `;
-
-        // Consensus summary
-        let consensusHtml = '<span style="color:var(--text-dim); font-size:0.75rem;">--</span>';
-        if (item.consensusVerdict) {
-          const agreeStr = item.consensusAgreementPercent ? ` (${Math.round(item.consensusAgreementPercent)}%)` : '';
-          consensusHtml = `<span style="font-family:var(--font-mono); font-size:0.72rem; color:#a5b4fc;">${escapeHtml(item.consensusVerdict)}${agreeStr}</span>`;
-        }
-
-        // Outcome Badge
-        let outcomeBadgeHtml;
-        let pnlHtml;
-
-        switch (item.outcomeStatus) {
-          case 'TARGET_HIT':
-            outcomeBadgeHtml = `<span class="outcome-badge tp-hit">🎯 TP HIT</span>`;
-            break;
-          case 'INVALIDATED':
-            outcomeBadgeHtml = `<span class="outcome-badge sl-hit">🛑 SL HIT</span>`;
-            break;
-          case 'EXPIRED_PROFIT':
-            outcomeBadgeHtml = `<span class="outcome-badge exp-profit">⏱️ EXPIRED</span>`;
-            break;
-          case 'EXPIRED_LOSS':
-            outcomeBadgeHtml = `<span class="outcome-badge exp-loss">⏱️ EXPIRED</span>`;
-            break;
-          default:
-            outcomeBadgeHtml = `<span class="outcome-badge pending">⏳ DAY ${item.elapsedDays}/7</span>`;
-            break;
-        }
-
-        // Realized or Unrealized PnL Cell
-        if (item.outcomeStatus !== 'PENDING' && item.realizedReturnPercent !== null && item.realizedReturnPercent !== undefined) {
-          const ret = Number(item.realizedReturnPercent) * 100;
-          const isPos = ret > 0;
-          const sign = isPos ? '+' : '';
-          pnlHtml = `<span class="pnl-cell ${isPos ? 'positive' : 'negative'}">${sign}${ret.toFixed(1)}%</span>`;
-        } else if (item.unrealizedReturnPercent !== null && item.unrealizedReturnPercent !== undefined) {
-          const uRet = Number(item.unrealizedReturnPercent) * 100;
-          const isPos = uRet >= 0;
-          const sign = isPos ? '+' : '';
-          pnlHtml = `<span class="pnl-cell unrealized" title="Unrealized floating return">${sign}${uRet.toFixed(1)}% (open)</span>`;
-        } else {
-          pnlHtml = `<span class="pnl-cell unrealized">--</span>`;
-        }
-
-        return `
-          <tr>
-            <td style="font-family: var(--font-mono); font-size: 0.75rem;">${item.date}</td>
-            <td style="font-family: var(--font-mono); font-weight: 600;">${priceStr}</td>
-            <td><span class="tag-badge ${badgeClass}">${escapeHtml(item.signal)}</span></td>
-            <td>${targetsHtml}</td>
-            <td>${consensusHtml}</td>
-            <td>${outcomeBadgeHtml}</td>
-            <td>${pnlHtml}</td>
-          </tr>
-        `;
-      }).join('');
+      // Render table
+      filterAndRenderJournalTable();
 
     } catch (err) {
-      console.error('Failed to load live prediction journal:', err);
+      console.error('Failed to load prediction journal:', err);
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 2rem; color: #fb7185;">Błąd ładowania dziennika: ${escapeHtml(err.message)}</td></tr>`;
+      }
     }
+  }
+
+  function updateJournalStatsUI(stats) {
+    if (!stats) return;
+    const elWinRate = document.getElementById('j-stat-winrate');
+    const elTargetRate = document.getElementById('j-stat-targetrate');
+    const elProfitFactor = document.getElementById('j-stat-profitfactor');
+    const elCumPnl = document.getElementById('j-stat-cumpnl');
+    const elCounts = document.getElementById('j-stat-counts');
+
+    if (elWinRate) {
+      elWinRate.innerText = stats.resolvedPredictions > 0 ? `${Number(stats.winRatePercent).toFixed(1)}%` : '--%';
+      elWinRate.style.color = stats.winRatePercent >= 50 ? '#34d399' : (stats.winRatePercent > 0 ? '#fb7185' : 'var(--text-main)');
+    }
+    if (elTargetRate) {
+      elTargetRate.innerText = stats.resolvedPredictions > 0 ? `${Number(stats.targetHitRatePercent).toFixed(1)}%` : '--%';
+      elTargetRate.style.color = stats.targetHitRatePercent >= 35 ? '#34d399' : 'var(--text-main)';
+    }
+    if (elProfitFactor) {
+      elProfitFactor.innerText = stats.resolvedPredictions > 0 ? Number(stats.profitFactor).toFixed(2) : '--';
+      elProfitFactor.style.color = stats.profitFactor >= 1.4 ? '#34d399' : (stats.profitFactor < 1.0 ? '#fb7185' : 'var(--text-main)');
+    }
+    if (elCumPnl) {
+      const pnlVal = Number(stats.cumulativeReturnPercent);
+      elCumPnl.innerText = stats.resolvedPredictions > 0 ? `${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(1)}%` : '--%';
+      elCumPnl.style.color = pnlVal > 0 ? '#34d399' : (pnlVal < 0 ? '#fb7185' : 'var(--text-main)');
+    }
+    if (elCounts) {
+      elCounts.innerText = `${stats.resolvedPredictions} / ${stats.pendingPredictions}`;
+    }
+  }
+
+  function updateJournalFilterCounts(items) {
+    const countAll = items.length;
+    const countTp = items.filter(i => i.outcomeStatus === 'TARGET_HIT').length;
+    const countSl = items.filter(i => i.outcomeStatus === 'INVALIDATED').length;
+    const countExp = items.filter(i => i.outcomeStatus === 'EXPIRED_PROFIT' || i.outcomeStatus === 'EXPIRED_LOSS').length;
+    const countPending = items.filter(i => i.outcomeStatus === 'PENDING').length;
+    const countBull = items.filter(i => i.signal === 'BULLISH_OPPORTUNITY').length;
+    const countBear = items.filter(i => i.signal === 'BEARISH_RISK').length;
+
+    const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    setTxt('j-count-all', countAll);
+    setTxt('j-count-tp', countTp);
+    setTxt('j-count-sl', countSl);
+    setTxt('j-count-expired', countExp);
+    setTxt('j-count-pending', countPending);
+    setTxt('j-count-bull', countBull);
+    setTxt('j-count-bear', countBear);
+  }
+
+  function filterAndRenderJournalTable() {
+    const tbody = document.getElementById('history-table-body');
+    if (!tbody) return;
+
+    let filtered = cachedJournalItems;
+    switch (currentJournalFilter) {
+      case 'tp':
+        filtered = cachedJournalItems.filter(i => i.outcomeStatus === 'TARGET_HIT');
+        break;
+      case 'sl':
+        filtered = cachedJournalItems.filter(i => i.outcomeStatus === 'INVALIDATED');
+        break;
+      case 'expired':
+        filtered = cachedJournalItems.filter(i => i.outcomeStatus === 'EXPIRED_PROFIT' || i.outcomeStatus === 'EXPIRED_LOSS');
+        break;
+      case 'pending':
+        filtered = cachedJournalItems.filter(i => i.outcomeStatus === 'PENDING');
+        break;
+      case 'bull':
+        filtered = cachedJournalItems.filter(i => i.signal === 'BULLISH_OPPORTUNITY');
+        break;
+      case 'bear':
+        filtered = cachedJournalItems.filter(i => i.signal === 'BEARISH_RISK');
+        break;
+      default:
+        filtered = cachedJournalItems;
+        break;
+    }
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-dim);">Brak pozycji spełniających wybrany filtr (${currentJournalFilter}).</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(item => {
+      let badgeClass = 'neutral';
+      let signalLabel = 'NEUTRAL';
+      if (item.signal === 'BULLISH_OPPORTUNITY') {
+        badgeClass = 'bullish';
+        signalLabel = 'BULLISH';
+      } else if (item.signal === 'BEARISH_RISK') {
+        badgeClass = 'bearish';
+        signalLabel = 'BEARISH';
+      }
+
+      const priceStr = formatMoney(item.btcClose);
+
+      // Target & Invalidation compact cell
+      const tpSign = item.targetChangePercent >= 0 ? '+' : '';
+      const slSign = item.invalidationChangePercent >= 0 ? '+' : '';
+      const tpStr = `TP: $${Number(item.targetPrice).toLocaleString('en-US')} (${tpSign}${(item.targetChangePercent * 100).toFixed(1)}%)`;
+      const slStr = `SL: $${Number(item.invalidationPrice).toLocaleString('en-US')} (${slSign}${(item.invalidationChangePercent * 100).toFixed(1)}%)`;
+      const targetsHtml = `
+        <div class="targets-cell">
+          <span class="tp-text">${escapeHtml(tpStr)}</span>
+          <span class="sl-text">${escapeHtml(slStr)}</span>
+        </div>
+      `;
+
+      // Consensus summary
+      let consensusHtml = '<span style="color:var(--text-dim); font-size:0.75rem;">--</span>';
+      if (item.consensusVerdict) {
+        const agreeStr = item.consensusAgreementPercent ? ` (${Math.round(item.consensusAgreementPercent)}%)` : '';
+        consensusHtml = `<span style="font-family:var(--font-mono); font-size:0.72rem; color:#a5b4fc;">${escapeHtml(item.consensusVerdict)}${agreeStr}</span>`;
+      }
+
+      // Outcome Badge
+      let outcomeBadgeHtml;
+      let pnlHtml;
+
+      switch (item.outcomeStatus) {
+        case 'TARGET_HIT':
+          outcomeBadgeHtml = `<span class="outcome-badge tp-hit">🎯 TP HIT</span>`;
+          break;
+        case 'INVALIDATED':
+          outcomeBadgeHtml = `<span class="outcome-badge sl-hit">🛑 SL HIT</span>`;
+          break;
+        case 'EXPIRED_PROFIT':
+          outcomeBadgeHtml = `<span class="outcome-badge exp-profit">⏱️ EXPIRED (+${(Number(item.realizedReturnPercent || 0) * 100).toFixed(1)}%)</span>`;
+          break;
+        case 'EXPIRED_LOSS':
+          outcomeBadgeHtml = `<span class="outcome-badge exp-loss">⏱️ EXPIRED (${(Number(item.realizedReturnPercent || 0) * 100).toFixed(1)}%)</span>`;
+          break;
+        default:
+          outcomeBadgeHtml = `<span class="outcome-badge pending">⏳ DZIEŃ ${item.elapsedDays}/7</span>`;
+          break;
+      }
+
+      // Realized or Unrealized PnL Cell
+      if (item.outcomeStatus !== 'PENDING' && item.realizedReturnPercent !== null && item.realizedReturnPercent !== undefined) {
+        const ret = Number(item.realizedReturnPercent) * 100;
+        const isPos = ret > 0;
+        const sign = isPos ? '+' : '';
+        pnlHtml = `<span class="pnl-cell ${isPos ? 'positive' : 'negative'}">${sign}${ret.toFixed(1)}%</span>`;
+      } else if (item.unrealizedReturnPercent !== null && item.unrealizedReturnPercent !== undefined) {
+        const uRet = Number(item.unrealizedReturnPercent) * 100;
+        const isPos = uRet >= 0;
+        const sign = isPos ? '+' : '';
+        pnlHtml = `<span class="pnl-cell unrealized" title="Unrealized floating return">${sign}${uRet.toFixed(1)}% (płynny)</span>`;
+      } else {
+        pnlHtml = `<span class="pnl-cell unrealized">--</span>`;
+      }
+
+      // Resolution Cell (Date & Exit Price)
+      let resolvedHtml;
+      if (item.outcomeStatus !== 'PENDING' && item.resolvedDate) {
+        const resPriceStr = item.resolvedPrice ? `$${Number(item.resolvedPrice).toLocaleString('en-US')}` : '';
+        resolvedHtml = `<div class="resolved-cell"><span>${item.resolvedDate}</span> <span style="color:#94a3b8;">(${resPriceStr})</span></div>`;
+      } else {
+        resolvedHtml = `<span class="resolved-cell" style="color:var(--text-dim);">Otwarte (7d)</span>`;
+      }
+
+      return `
+        <tr>
+          <td style="font-family: var(--font-mono); font-size: 0.75rem;">${item.date}</td>
+          <td style="font-family: var(--font-mono); font-weight: 600;">${priceStr}</td>
+          <td>
+            <span class="tag-badge ${badgeClass}">${escapeHtml(signalLabel)}</span>
+            <div style="font-size: 0.68rem; color: var(--text-dim); margin-top: 2px;">${escapeHtml(item.marketRegime || '')}</div>
+          </td>
+          <td>${targetsHtml}</td>
+          <td>${consensusHtml}</td>
+          <td>${outcomeBadgeHtml}</td>
+          <td>${pnlHtml}</td>
+          <td>${resolvedHtml}</td>
+        </tr>
+      `;
+    }).join('');
   }
 
   // Run Quick Walk-Forward Backtest
@@ -1425,6 +1517,39 @@
 
     document.addEventListener('click', () => {
       document.querySelectorAll('.tooltip-trigger.active').forEach(t => t.classList.remove('active'));
+    });
+
+    // Journal Mode Toggle (Historical vs Live)
+    const btnJHist = document.getElementById('btn-jmode-historical');
+    const btnJLive = document.getElementById('btn-jmode-live');
+    const subTitle = document.getElementById('journal-mode-subtitle');
+
+    if (btnJHist && btnJLive) {
+      btnJHist.addEventListener('click', () => {
+        if (currentJournalMode === 'historical') return;
+        btnJHist.classList.add('active');
+        btnJLive.classList.remove('active');
+        if (subTitle) subTitle.textContent = 'Empiryczna weryfikacja modeli AI na danych historycznych (~180 dni, okno kroczące bez wycieku w przyszłość)';
+        loadHistoricalPredictions('historical');
+      });
+
+      btnJLive.addEventListener('click', () => {
+        if (currentJournalMode === 'live') return;
+        btnJLive.classList.add('active');
+        btnJHist.classList.remove('active');
+        if (subTitle) subTitle.textContent = 'Predykcje rejestrowane w czasie rzeczywistym o 00:05 UTC (SQLite forward-testing)';
+        loadHistoricalPredictions('live');
+      });
+    }
+
+    // Journal Filter Pills
+    document.querySelectorAll('.j-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.j-filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentJournalFilter = btn.dataset.filter || 'all';
+        filterAndRenderJournalTable();
+      });
     });
   }
 

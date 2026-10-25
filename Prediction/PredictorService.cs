@@ -648,4 +648,301 @@ public class PredictorService : IPredictorService
 
         return Math.Clamp(score, 0.05f, 0.95f);
     }
+
+    private static (int MarketDataCount, DateOnly LastDate, PredictionJournalResponse Result)? _cachedHistoricalJournal;
+    private static readonly object _cacheLock = new();
+
+    public PredictionJournalResponse GenerateWalkForwardJournal(
+        IReadOnlyList<DailyMarketData> marketData,
+        IReadOnlyList<DailyFeatures> features,
+        ITurningPointDetector turningPointDetector)
+    {
+        if (marketData == null || marketData.Count == 0 || features == null || features.Count == 0)
+        {
+            return new PredictionJournalResponse
+            {
+                Mode = "historical",
+                Stats = new LiveJournalStats(),
+                Items = Array.Empty<PredictionJournalItem>()
+            };
+        }
+
+        var sortedMarket = marketData.OrderBy(d => d.Date).ToList();
+        var sortedFeatures = features.OrderBy(f => f.Date).ToList();
+        var featuresByDate = sortedFeatures.ToDictionary(f => f.Date);
+        var lastMarketDate = sortedMarket[^1].Date;
+
+        lock (_cacheLock)
+        {
+            if (_cachedHistoricalJournal.HasValue &&
+                _cachedHistoricalJournal.Value.MarketDataCount == sortedMarket.Count &&
+                _cachedHistoricalJournal.Value.LastDate == lastMarketDate)
+            {
+                return _cachedHistoricalJournal.Value.Result;
+            }
+        }
+
+        // Minimum starting evaluation date requires at least 10 training samples (with 7d lookahead buffer)
+        var minEvaluationDate = sortedMarket[0].Date.AddDays(23);
+        var candidateDates = sortedMarket
+            .Where(d => d.Date >= minEvaluationDate)
+            .OrderBy(d => d.Date)
+            .ToList();
+
+        var journalItems = new List<PredictionJournalItem>();
+        PredictorService? activePredictor = null;
+        DateOnly? lastTrainedCutoff = null;
+
+        foreach (var todayMarket in candidateDates)
+        {
+            var date = todayMarket.Date;
+            if (!featuresByDate.TryGetValue(date, out var todayFeatures))
+                continue;
+
+            // Retrain expanding-window model weekly (every 7 days) strictly on data prior to date.AddDays(-7)
+            var currentCutoff = date.AddDays(-7);
+            if (activePredictor == null || !lastTrainedCutoff.HasValue || (currentCutoff.DayNumber - lastTrainedCutoff.Value.DayNumber) >= 7)
+            {
+                var historicalMarket = sortedMarket.Where(m => m.Date <= currentCutoff).ToList();
+                var historicalFeatures = sortedFeatures.Where(f => f.Date <= currentCutoff).ToList();
+
+                var trainDataset = turningPointDetector.BuildTrainingDataset(historicalMarket, historicalFeatures, lookaheadDays: 7);
+                var newPredictor = new PredictorService();
+                if (trainDataset.Count >= 10)
+                {
+                    try
+                    {
+                        newPredictor.TrainModel(trainDataset);
+                    }
+                    catch
+                    {
+                        // Fallback to internal rules if training fails
+                    }
+                }
+                activePredictor = newPredictor;
+                lastTrainedCutoff = currentCutoff;
+            }
+
+            // Predict using strictly out-of-sample expanding model
+            var pred = activePredictor.Predict(todayFeatures, todayMarket);
+
+            // Forward outcome evaluation across subsequent 7 candles
+            var forwardCandles = sortedMarket
+                .Where(c => c.Date > date && c.Date <= date.AddDays(7))
+                .OrderBy(c => c.Date)
+                .ToList();
+
+            int elapsedDays = lastMarketDate.DayNumber - date.DayNumber;
+            string outcome = "PENDING";
+            decimal? realizedReturn = null;
+            decimal? unrealizedReturn = null;
+            DateOnly? resolvedDate = null;
+            decimal? resolvedPrice = null;
+            bool resolved = false;
+
+            decimal targetPrice = pred.TargetPrice;
+            decimal invalidationPrice = pred.InvalidationPrice;
+            decimal targetChangePct = pred.TargetChangePercent;
+            decimal invalidationChangePct = pred.InvalidationChangePercent;
+            decimal rrRatio = pred.RiskRewardRatio > 0 ? pred.RiskRewardRatio : 2.0m;
+
+            if (pred.Signal == "BULLISH_OPPORTUNITY")
+            {
+                foreach (var c in forwardCandles)
+                {
+                    if (c.BtcHigh >= targetPrice)
+                    {
+                        outcome = "TARGET_HIT";
+                        realizedReturn = Math.Abs(targetChangePct);
+                        resolvedDate = c.Date;
+                        resolvedPrice = targetPrice;
+                        resolved = true;
+                        break;
+                    }
+                    if (c.BtcLow <= invalidationPrice)
+                    {
+                        outcome = "INVALIDATED";
+                        realizedReturn = -Math.Abs(invalidationChangePct);
+                        resolvedDate = c.Date;
+                        resolvedPrice = invalidationPrice;
+                        resolved = true;
+                        break;
+                    }
+                }
+
+                if (!resolved)
+                {
+                    if (elapsedDays >= 7 && forwardCandles.Count > 0)
+                    {
+                        var lastC = forwardCandles[^1];
+                        decimal ret = (lastC.BtcClose - pred.BtcClose) / pred.BtcClose;
+                        outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
+                        realizedReturn = Math.Round(ret, 4);
+                        resolvedDate = lastC.Date;
+                        resolvedPrice = lastC.BtcClose;
+                        resolved = true;
+                    }
+                    else if (lastMarketDate > date)
+                    {
+                        var latestCandle = sortedMarket[^1];
+                        unrealizedReturn = Math.Round((latestCandle.BtcClose - pred.BtcClose) / pred.BtcClose, 4);
+                    }
+                }
+            }
+            else if (pred.Signal == "BEARISH_RISK")
+            {
+                foreach (var c in forwardCandles)
+                {
+                    if (c.BtcLow <= targetPrice)
+                    {
+                        outcome = "TARGET_HIT";
+                        realizedReturn = Math.Abs(targetChangePct);
+                        resolvedDate = c.Date;
+                        resolvedPrice = targetPrice;
+                        resolved = true;
+                        break;
+                    }
+                    if (c.BtcHigh >= invalidationPrice)
+                    {
+                        outcome = "INVALIDATED";
+                        realizedReturn = -Math.Abs(invalidationChangePct);
+                        resolvedDate = c.Date;
+                        resolvedPrice = invalidationPrice;
+                        resolved = true;
+                        break;
+                    }
+                }
+
+                if (!resolved)
+                {
+                    if (elapsedDays >= 7 && forwardCandles.Count > 0)
+                    {
+                        var lastC = forwardCandles[^1];
+                        decimal ret = (pred.BtcClose - lastC.BtcClose) / pred.BtcClose;
+                        outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
+                        realizedReturn = Math.Round(ret, 4);
+                        resolvedDate = lastC.Date;
+                        resolvedPrice = lastC.BtcClose;
+                        resolved = true;
+                    }
+                    else if (lastMarketDate > date)
+                    {
+                        var latestCandle = sortedMarket[^1];
+                        unrealizedReturn = Math.Round((pred.BtcClose - latestCandle.BtcClose) / pred.BtcClose, 4);
+                    }
+                }
+            }
+            else
+            {
+                // NEUTRAL_HOLD
+                if (elapsedDays >= 7 && forwardCandles.Count > 0)
+                {
+                    var lastC = forwardCandles[^1];
+                    decimal ret = (lastC.BtcClose - pred.BtcClose) / pred.BtcClose;
+                    outcome = Math.Abs(ret) <= 0.03m ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
+                    realizedReturn = Math.Round(ret, 4);
+                    resolvedDate = lastC.Date;
+                    resolvedPrice = lastC.BtcClose;
+                    resolved = true;
+                }
+            }
+
+            journalItems.Add(new PredictionJournalItem
+            {
+                Date = date,
+                BtcClose = pred.BtcClose,
+                Signal = pred.Signal,
+                BullishProbability = pred.BullishProbability,
+                MarketRegime = pred.MarketRegime,
+                Confidence = pred.Confidence,
+                TargetPrice = targetPrice,
+                InvalidationPrice = invalidationPrice,
+                TargetChangePercent = targetChangePct,
+                InvalidationChangePercent = invalidationChangePct,
+                RiskRewardRatio = rrRatio,
+                HorizonDays = 7,
+                ConsensusVerdict = pred.Ensemble?.ConsensusVerdict,
+                ConsensusAgreementPercent = pred.Ensemble?.ConsensusAgreementPercent,
+                OutcomeStatus = outcome,
+                RealizedReturnPercent = realizedReturn,
+                UnrealizedReturnPercent = unrealizedReturn,
+                ResolvedDate = resolvedDate,
+                ResolvedPrice = resolvedPrice,
+                ElapsedDays = Math.Min(elapsedDays, 7)
+            });
+        }
+
+        // Aggregate statistics
+        var resolvedItems = journalItems.Where(i => i.OutcomeStatus != "PENDING").ToList();
+        int resolvedCount = resolvedItems.Count;
+        int pendingCount = journalItems.Count - resolvedCount;
+
+        int targetHits = resolvedItems.Count(i => i.OutcomeStatus == "TARGET_HIT");
+        int invalidations = resolvedItems.Count(i => i.OutcomeStatus == "INVALIDATED");
+        int expiredProfits = resolvedItems.Count(i => i.OutcomeStatus == "EXPIRED_PROFIT");
+        int expiredLosses = resolvedItems.Count(i => i.OutcomeStatus == "EXPIRED_LOSS");
+
+        int winningTrades = targetHits + expiredProfits;
+        decimal winRate = resolvedCount > 0 ? Math.Round((decimal)winningTrades / resolvedCount * 100m, 1) : 0m;
+        decimal targetHitRate = resolvedCount > 0 ? Math.Round((decimal)targetHits / resolvedCount * 100m, 1) : 0m;
+
+        decimal totalGains = resolvedItems.Where(i => (i.RealizedReturnPercent ?? 0m) > 0).Sum(i => i.RealizedReturnPercent ?? 0m);
+        decimal totalLosses = Math.Abs(resolvedItems.Where(i => (i.RealizedReturnPercent ?? 0m) < 0).Sum(i => i.RealizedReturnPercent ?? 0m));
+
+        decimal profitFactor = totalLosses > 0 ? Math.Round(totalGains / totalLosses, 2) : (totalGains > 0 ? 99m : 1m);
+        decimal cumulativeReturn = Math.Round(resolvedItems.Sum(i => i.RealizedReturnPercent ?? 0m) * 100m, 1);
+        decimal avgReturn = resolvedCount > 0 ? Math.Round(cumulativeReturn / resolvedCount, 2) : 0m;
+
+        var stats = new LiveJournalStats
+        {
+            TotalPredictions = journalItems.Count,
+            ResolvedPredictions = resolvedCount,
+            PendingPredictions = pendingCount,
+            TargetHits = targetHits,
+            Invalidations = invalidations,
+            ExpiredProfits = expiredProfits,
+            ExpiredLosses = expiredLosses,
+            WinRatePercent = winRate,
+            TargetHitRatePercent = targetHitRate,
+            ProfitFactor = profitFactor,
+            CumulativeReturnPercent = cumulativeReturn,
+            AverageReturnPercent = avgReturn
+        };
+
+        // Equity curve
+        var equityPoints = new List<JournalEquityPoint>();
+        decimal runningPnl = 0m;
+        decimal peakPnl = 0m;
+
+        foreach (var rItem in resolvedItems.OrderBy(i => i.ResolvedDate ?? i.Date))
+        {
+            runningPnl += (rItem.RealizedReturnPercent ?? 0m) * 100m;
+            if (runningPnl > peakPnl)
+                peakPnl = runningPnl;
+
+            decimal drawdown = peakPnl > 0 ? Math.Min(0m, runningPnl - peakPnl) : 0m;
+
+            equityPoints.Add(new JournalEquityPoint
+            {
+                Date = rItem.ResolvedDate ?? rItem.Date,
+                CumulativeReturnPercent = Math.Round(runningPnl, 2),
+                DrawdownPercent = Math.Round(drawdown, 2)
+            });
+        }
+
+        var response = new PredictionJournalResponse
+        {
+            Mode = "historical",
+            Stats = stats,
+            Items = journalItems.OrderByDescending(i => i.Date).ToList(),
+            EquityCurve = equityPoints
+        };
+
+        lock (_cacheLock)
+        {
+            _cachedHistoricalJournal = (sortedMarket.Count, lastMarketDate, response);
+        }
+
+        return response;
+    }
 }

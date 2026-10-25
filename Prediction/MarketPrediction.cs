@@ -118,9 +118,18 @@ public sealed record LiveJournalStats
     public decimal AverageReturnPercent { get; init; }
 }
 
+public sealed record JournalEquityPoint
+{
+    public DateOnly Date { get; init; }
+    public decimal CumulativeReturnPercent { get; init; }
+    public decimal DrawdownPercent { get; init; }
+}
+
 public sealed record PredictionJournalResponse
 {
+    public string Mode { get; init; } = "historical"; // "historical" or "live"
     public LiveJournalStats Stats { get; init; } = default!;
     public IReadOnlyList<PredictionJournalItem> Items { get; init; } = Array.Empty<PredictionJournalItem>();
+    public IReadOnlyList<JournalEquityPoint> EquityCurve { get; init; } = Array.Empty<JournalEquityPoint>();
 }
 

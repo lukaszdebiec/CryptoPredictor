@@ -498,56 +498,91 @@
       </div>
     </section>
 
-    <!-- Live Prediction Journal & Accuracy Tracker Table -->
+    <!-- Live & Historical Prediction Journal & Walk-Forward Ledger -->
     <section class="history-section">
       <div class="card table-card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; flex-wrap: wrap; gap: 0.5rem;">
-          <div class="chart-title">
-            <span>Live Prediction Journal & Accuracy Tracker</span>
+        <div class="journal-header-row">
+          <div>
+            <div class="chart-title">
+              <span>Dziennik Predykcji & Walk-Forward Ledger</span>
+            </div>
+            <span style="font-size: 0.75rem; color: var(--text-dim);" id="journal-mode-subtitle">
+              Empiryczna weryfikacja modeli AI na danych historycznych (~180 dni, okno kroczące bez wycieku w przyszłość)
+            </span>
           </div>
-          <span style="font-size: 0.75rem; color: var(--text-dim);">Automated 7-Day Out-of-Sample Forward Verification (SQLite)</span>
+
+          <!-- Mode Selector Toggle -->
+          <div class="journal-mode-toggle">
+            <button class="j-mode-btn active" id="btn-jmode-historical" data-mode="historical" title="Zobacz pełną historię modeli AI testowaną na przestrzeni ostatnich 180 dni">
+              📜 Cała Historia (~180D)
+            </button>
+            <button class="j-mode-btn" id="btn-jmode-live" data-mode="live" title="Zobacz predykcje rejestrowane codziennie o 00:05 UTC przez automatyczny worker">
+              🔴 Na Żywo (Forward-Testing)
+            </button>
+          </div>
         </div>
 
-        <!-- Live Performance Stat Badges -->
+        <!-- Quant Context Explanatory Banner -->
+        <div class="journal-explain-banner">
+          <span class="banner-icon">💡</span>
+          <div>
+            <strong>Dlaczego pojedyncze backtesty mogą wydawać się "średnie"?</strong>
+            W tradingu ilościowym z asymetrią ryzyka <strong>R:R = 2.0</strong> (Target +8.0% vs Stop-Loss -4.0%), punkt rentowności (break-even) wynosi zaledwie <strong>33.3%</strong>. Przy trafności <strong>50–55%</strong> zyskownych transakcji strategia generuje potężną przewagę statystyczną (Profit Factor &gt; 1.5). Poniższy dziennik walk-forward weryfikuje każde 7-dniowe okno na czystych danych bez wycieku w przyszłość.
+          </div>
+        </div>
+
+        <!-- Performance Stat Badges -->
         <div id="journal-stats-bar" class="journal-stats-bar">
-          <div class="journal-stat-item">
+          <div class="journal-stat-item" title="Odsetek zyskownych zagrań (TP HIT + Expired Profit) w stosunku do wszystkich rozstrzygniętych transakcji">
             <span class="j-stat-label">WIN RATE</span>
             <span id="j-stat-winrate" class="j-stat-val">--%</span>
           </div>
-          <div class="journal-stat-item">
+          <div class="journal-stat-item" title="Odsetek transakcji, które osiągnęły pełny cel zysku (+8.0%) w ciągu 7 dni">
             <span class="j-stat-label">TARGET HIT RATE</span>
             <span id="j-stat-targetrate" class="j-stat-val">--%</span>
           </div>
-          <div class="journal-stat-item">
+          <div class="journal-stat-item" title="Stosunek sumy zysków brutto do sumy strat brutto (powyżej 1.5 uznawany za wybitny)">
             <span class="j-stat-label">PROFIT FACTOR</span>
             <span id="j-stat-profitfactor" class="j-stat-val">--</span>
           </div>
-          <div class="journal-stat-item">
+          <div class="journal-stat-item" title="Suma skumulowanego zwrotu ze wszystkich zakończonych pozycji (PnL)">
             <span class="j-stat-label">CUMULATIVE PNL</span>
             <span id="j-stat-cumpnl" class="j-stat-val">--%</span>
           </div>
-          <div class="journal-stat-item">
+          <div class="journal-stat-item" title="Liczba pozycji rozstrzygniętych / Liczba pozycji będących aktualnie w toku (7 dni)">
             <span class="j-stat-label">RESOLVED / PENDING</span>
             <span id="j-stat-counts" class="j-stat-val">-- / --</span>
           </div>
+        </div>
+
+        <!-- Quick Filter Pills -->
+        <div class="journal-filter-pills">
+          <button class="j-filter-btn active" data-filter="all">Wszystkie (<span id="j-count-all">0</span>)</button>
+          <button class="j-filter-btn" data-filter="tp">🎯 TP HIT (<span id="j-count-tp">0</span>)</button>
+          <button class="j-filter-btn" data-filter="sl">🛑 SL HIT (<span id="j-count-sl">0</span>)</button>
+          <button class="j-filter-btn" data-filter="expired">⏱️ EXPIRED (<span id="j-count-expired">0</span>)</button>
+          <button class="j-filter-btn" data-filter="pending">⏳ W toku (<span id="j-count-pending">0</span>)</button>
+          <button class="j-filter-btn" data-filter="bull">🟢 Bullish (<span id="j-count-bull">0</span>)</button>
+          <button class="j-filter-btn" data-filter="bear">🔴 Bearish (<span id="j-count-bear">0</span>)</button>
         </div>
 
         <div style="overflow-x: auto;">
           <table class="custom-table journal-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>BTC Close</th>
-                <th>Signal</th>
-                <th>Targets (TP / SL)</th>
-                <th>Consensus</th>
-                <th>7D Outcome</th>
-                <th>Realized PnL</th>
+                <th>Data</th>
+                <th>Kurs BTC</th>
+                <th>Sygnał & Reżim</th>
+                <th>Cele (TP / SL)</th>
+                <th>Rada Modeli</th>
+                <th>Wynik 7D</th>
+                <th>Zrealizowany PnL</th>
+                <th>Rozstrzygnięcie</th>
               </tr>
             </thead>
             <tbody id="history-table-body">
               <tr>
-                <td colspan="7" style="text-align: center; padding: 2rem;">Loading live journal & accuracy metrics...</td>
+                <td colspan="8" style="text-align: center; padding: 2rem;">Ładowanie dziennika predykcji & wskaźników trafności...</td>
               </tr>
             </tbody>
           </table>
@@ -566,6 +601,6 @@
 
   <!-- Scripts -->
   <script src="/js/lightweight-charts.standalone.production.js"></script>
-  <script src="/js/app.js?v=1.6"></script>
+  <script src="/js/app.js?v=1.7"></script>
 </body>
 </html>

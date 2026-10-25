@@ -10,4 +10,8 @@ public interface IPredictorService
 
     ModelTrainingMetrics TrainModel(IReadOnlyList<ModelTrainingSample> dataset);
     MarketPrediction Predict(DailyFeatures todayFeatures, DailyMarketData todayMarket);
+    PredictionJournalResponse GenerateWalkForwardJournal(
+        IReadOnlyList<DailyMarketData> marketData,
+        IReadOnlyList<DailyFeatures> features,
+        ITurningPointDetector turningPointDetector);
 }

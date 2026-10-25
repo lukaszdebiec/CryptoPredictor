@@ -167,6 +167,19 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
   - Podsumowanie zrealizowanego PnL, rzeczywistej 7-dniowej stopy zwrotu Bitcoina, dnia rozstrzygnięcia oraz oceny trafności kierunkowej modelu.
 - [x] **Szybkie Presety i Losowy Dzień:**
   - Zdefiniowane presety kluczowych punktów zwrotnych (dołek paniki $83.5k, szczyt euforyczny $86.5k, bounce $81.7k) oraz generator losowego dnia (`🎲 Losowy dzień`).
+### Priorytet 16: Dziennik Predykcji & Walk-Forward Trade Ledger na Pełnej Historii (~180 Dni) ✅
+- [x] **Kroczący Rejestr Walk-Forward (Expanding-Window Walk-Forward Ledger):**
+  - Generowanie pełnego rejestru transakcyjnego dla każdego dnia w historii (~180 dni, kwiecień – październik 2026).
+  - Tygodniowy harmonogram przetrenowywania modeli ML.NET (co 7 dni na danych ściśle sprzed $T-7$) z zerowym wyciekiem przyszłości i buforowaniem w pamięci RAM.
+  - Automatyczne rozliczanie każdego 7-dniowego horyzontu: `TARGET_HIT` (+8.0%), `INVALIDATED` (-4.0%), `EXPIRED_PROFIT`, `EXPIRED_LOSS` oraz `PENDING` dla ostatnich 7 dni.
+- [x] **Przełącznik Trybów: Cała Historia (~180D) vs Na Żywo (Forward-Testing):**
+  - Płynny toggle `[ 📜 Cała Historia (~180D) ]` i `[ 🔴 Na Żywo (Forward-Testing) ]` pozwalający porównać empiryczną historię z bieżącymi sygnałami SQLite.
+- [x] **Błyskawiczne Pigułki Filtrujące (Quick Filter Pills):**
+  - Filtrowanie tabeli w locie z dynamicznymi licznikami: `Wszystkie`, `🎯 TP HIT`, `🛑 SL HIT`, `⏱️ EXPIRED`, `⏳ W toku`, `🟢 Bullish`, `🔴 Bearish`.
+- [x] **Ilościowa Przewaga R:R 2.0 (Quant Context Banner):**
+  - Edukacyjny baner wyjaśniający asymetrię zysku do ryzyka: przy $R:R = 2.0$, próg rentowności (break-even) wynosi 33.3%, a skuteczność 50–55% generuje wysoką rentowność (Profit Factor > 1.5).
+- [x] **Rozbudowana Tabela Transakcji:**
+  - 8 kolumn ze statusem reżimu, celami TP/SL, zgodnością konsensusu, plakietkami rozstrzygnięcia, zrealizowanym PnL i datą wyjścia z pozycji.
 
 ---
 
