@@ -133,7 +133,8 @@
       timeScale: {
         borderColor: COLORS.border,
         timeVisible: true,
-        secondsVisible: false
+        secondsVisible: false,
+        rightOffset: 12
       }
     };
 
@@ -294,16 +295,28 @@
 
       const data = await res.json();
       cachedChartData = data;
+      renderChart(data, true);
+    } catch (err) {
+      console.error('Failed to load chart data:', err);
+      showToast('Failed to load chart data: ' + err.message, 'error');
+    }
+  }
 
-      // Update Subtitle description
-      const subtitle = document.getElementById('chart-timeframe-desc');
-      if (subtitle) {
-        subtitle.innerText = timeframe === '4h' 
-          ? '4-Hour Candles + Intraday Microstructure & Sweeps' 
-          : 'Daily Candles + ML Turning Points';
-      }
+  // Render or Re-render Chart from cached/fetched data
+  function renderChart(data, shouldFitContent = false) {
+    if (!data || !mainChart) return;
+    try {
+      cachedChartData = data;
 
-      // Map candles to LightweightCharts format
+    // Update Subtitle description
+    const subtitle = document.getElementById('chart-timeframe-desc');
+    if (subtitle) {
+      subtitle.innerText = currentTimeframe === '4h' 
+        ? '4-Hour Candles + Intraday Microstructure & Sweeps' 
+        : 'Daily Candles + ML Turning Points';
+    }
+
+    // Map candles to LightweightCharts format
       const candleData = data.candles.map(c => ({
         time: parseChartTime(c.time),
         open: Number(c.open),
@@ -516,50 +529,59 @@
         const isBearish = pred.signal === 'BEARISH_RISK';
         const isBullish = pred.signal === 'BULLISH_OPPORTUNITY';
 
-        // 1. Dynamic Target Price (TP)
-        if (pred.targetPrice > 0) {
-          const targetColor = isBearish ? '#f43f5e' : (isBullish ? '#10b981' : '#38bdf8');
-          const targetSign = pred.targetChangePercent > 0 ? '+' : '';
-          activeTargetLines.push(candlestickSeries.createPriceLine({
-            price: Number(pred.targetPrice),
-            color: targetColor,
-            lineWidth: 2,
-            lineStyle: LightweightCharts.LineStyle.Dashed,
-            axisLabelVisible: true,
-            title: `🎯 7D Target: $${Number(pred.targetPrice).toLocaleString('en-US')} (${targetSign}${(Number(pred.targetChangePercent) * 100).toFixed(1)}%)`
-          }));
-        }
+        if (showForecastCone) {
+          // 1. Dynamic Target Price (TP)
+          if (pred.targetPrice > 0) {
+            const targetColor = isBearish ? '#f43f5e' : (isBullish ? '#10b981' : '#38bdf8');
+            const targetSign = pred.targetChangePercent > 0 ? '+' : '';
+            activeTargetLines.push(candlestickSeries.createPriceLine({
+              price: Number(pred.targetPrice),
+              color: targetColor,
+              lineWidth: 2,
+              lineStyle: LightweightCharts.LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: `🎯 7D Target: $${Number(pred.targetPrice).toLocaleString('en-US')} (${targetSign}${(Number(pred.targetChangePercent) * 100).toFixed(1)}%)`
+            }));
+          }
 
-        // 2. Invalidation Level (SL)
-        if (pred.invalidationPrice > 0) {
-          const invSign = pred.invalidationChangePercent > 0 ? '+' : '';
-          activeTargetLines.push(candlestickSeries.createPriceLine({
-            price: Number(pred.invalidationPrice),
-            color: 'rgba(244, 63, 94, 0.65)',
-            lineWidth: 1,
-            lineStyle: LightweightCharts.LineStyle.Dotted,
-            axisLabelVisible: true,
-            title: `🛑 Invalidation (SL): $${Number(pred.invalidationPrice).toLocaleString('en-US')} (${invSign}${(Number(pred.invalidationChangePercent) * 100).toFixed(1)}%)`
-          }));
-        }
+          // 2. Invalidation Level (SL)
+          if (pred.invalidationPrice > 0) {
+            const invSign = pred.invalidationChangePercent > 0 ? '+' : '';
+            activeTargetLines.push(candlestickSeries.createPriceLine({
+              price: Number(pred.invalidationPrice),
+              color: 'rgba(244, 63, 94, 0.65)',
+              lineWidth: 1,
+              lineStyle: LightweightCharts.LineStyle.Dotted,
+              axisLabelVisible: true,
+              title: `🛑 Invalidation (SL): $${Number(pred.invalidationPrice).toLocaleString('en-US')} (${invSign}${(Number(pred.invalidationChangePercent) * 100).toFixed(1)}%)`
+            }));
+          }
 
-        // 3. Render 7-Day Volatility Forecast Cone
-        if (predictionCenterSeries && predictionUpperSeries && predictionLowerSeries) {
-          if (showForecastCone && pred.projectionCone && pred.projectionCone.length > 0) {
-            const coneColor = isBearish ? '#f43f5e' : (isBullish ? '#10b981' : '#38bdf8');
-            const bandColor = isBearish ? 'rgba(244, 63, 94, 0.35)' : (isBullish ? 'rgba(16, 185, 129, 0.35)' : 'rgba(56, 189, 248, 0.35)');
+          // 3. Render 7-Day Volatility Forecast Cone
+          if (predictionCenterSeries && predictionUpperSeries && predictionLowerSeries) {
+            if (pred.projectionCone && pred.projectionCone.length > 0) {
+              const coneColor = isBearish ? '#f43f5e' : (isBullish ? '#10b981' : '#38bdf8');
+              const bandColor = isBearish ? 'rgba(244, 63, 94, 0.4)' : (isBullish ? 'rgba(16, 185, 129, 0.4)' : 'rgba(56, 189, 248, 0.4)');
 
-            predictionCenterSeries.applyOptions({
-              color: coneColor,
-              title: isBearish ? '7D Bearish Trajectory' : (isBullish ? '7D Bullish Trajectory' : '7D Expected Trajectory')
-            });
-            predictionUpperSeries.applyOptions({ color: bandColor });
-            predictionLowerSeries.applyOptions({ color: bandColor });
+              predictionCenterSeries.applyOptions({
+                visible: true,
+                color: coneColor,
+                title: isBearish ? '7D Bearish Trajectory' : (isBullish ? '7D Bullish Trajectory' : '7D Expected Trajectory')
+              });
+              predictionUpperSeries.applyOptions({ visible: true, color: bandColor });
+              predictionLowerSeries.applyOptions({ visible: true, color: bandColor });
 
-            predictionCenterSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.expectedPrice) })));
-            predictionUpperSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.upperBand) })));
-            predictionLowerSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.lowerBand) })));
-          } else {
+              predictionCenterSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.expectedPrice) })));
+              predictionUpperSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.upperBand) })));
+              predictionLowerSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.lowerBand) })));
+            }
+          }
+        } else {
+          // Hide forecast cone series and clear scale tags when toggled off
+          if (predictionCenterSeries && predictionUpperSeries && predictionLowerSeries) {
+            predictionCenterSeries.applyOptions({ visible: false });
+            predictionUpperSeries.applyOptions({ visible: false });
+            predictionLowerSeries.applyOptions({ visible: false });
             predictionCenterSeries.setData([]);
             predictionUpperSeries.setData([]);
             predictionLowerSeries.setData([]);
@@ -569,18 +591,24 @@
         // 4. Update Target Badge in Chart Header
         const targetBadge = document.getElementById('badge-forecast-target');
         if (targetBadge && pred.targetPrice > 0) {
-          targetBadge.style.display = 'inline-flex';
-          targetBadge.className = `target-badge ${isBearish ? 'bearish-target' : 'bullish-target'}`;
-          const sign = pred.targetChangePercent > 0 ? '+' : '';
-          targetBadge.innerHTML = `🎯 7D Target: $${Number(pred.targetPrice).toLocaleString('en-US')} (${sign}${(Number(pred.targetChangePercent) * 100).toFixed(1)}%)`;
+          if (showForecastCone) {
+            targetBadge.style.display = 'inline-flex';
+            targetBadge.className = `target-badge ${isBearish ? 'bearish-target' : 'bullish-target'}`;
+            const sign = pred.targetChangePercent > 0 ? '+' : '';
+            targetBadge.innerHTML = `🎯 7D Target: $${Number(pred.targetPrice).toLocaleString('en-US')} (${sign}${(Number(pred.targetChangePercent) * 100).toFixed(1)}%)`;
+          } else {
+            targetBadge.style.display = 'none';
+          }
         }
       }
 
       // Update Subchart
       renderSubchart();
 
-      // Fit content
-      mainChart.timeScale().fitContent();
+      // Fit content only when requested
+      if (shouldFitContent && mainChart && mainChart.timeScale) {
+        mainChart.timeScale().fitContent();
+      }
 
       // Update Summary stat cards
       if (data.summary) {
@@ -607,10 +635,8 @@
           setLegendValues(latest.time, latest.open, latest.high, latest.low, latest.close, latest.volume);
         }
       }
-
     } catch (err) {
-      console.error('Failed to load chart data:', err);
-      showToast('Failed to load chart data: ' + err.message, 'error');
+      console.error('Failed to render chart:', err);
     }
   }
 
@@ -1193,7 +1219,7 @@
         showForecastCone = !showForecastCone;
         btnToggleCone.classList.toggle('active', showForecastCone);
         if (cachedChartData) {
-          renderChart(cachedChartData);
+          renderChart(cachedChartData, false);
         }
       });
     }
