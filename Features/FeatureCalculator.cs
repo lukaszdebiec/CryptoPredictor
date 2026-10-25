@@ -39,10 +39,13 @@ public class FeatureCalculator : IFeatureCalculator
         }
 
         decimal allTimeHigh = 0m;
+        int consecutivePriceDays = 0;
 
         for (int i = 0; i < sorted.Count; i++)
         {
             var current = sorted[i];
+            consecutivePriceDays = current.BtcClose <= 0m ? 0
+                : i > 0 && sorted[i - 1].Date.AddDays(1) == current.Date ? consecutivePriceDays + 1 : 1;
 
             // Update ATH tracking
             if (current.BtcHigh > allTimeHigh)
@@ -126,6 +129,7 @@ public class FeatureCalculator : IFeatureCalculator
             results.Add(new DailyFeatures
             {
                 Date = current.Date,
+                ConsecutivePriceDays = consecutivePriceDays,
                 BtcReturn1d = ret1d,
                 BtcReturn3d = ret3d,
                 BtcReturn7d = ret7d,

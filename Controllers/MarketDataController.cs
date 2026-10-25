@@ -266,7 +266,7 @@ public class MarketDataController : ControllerBase
                 var ker = latestFeat?.KaufmanEfficiencyRatio10d ?? 0m;
                 var currentRatio = (swingHigh - latest.BtcClose) / range;
                 var inGoldenPocket = currentRatio >= 0.60m && currentRatio <= 0.66m;
-                var waveRegime = ker > 0.55m ? "Impulse Wave (Wave 3/5 Momentum)" : (ker < 0.25m ? "Corrective Structure (Wave 4 / ABC Chop)" : "Consolidation / Transitory");
+                var waveRegime = ker > 0.55m ? "Directional movement" : (ker < 0.25m ? "Low directional efficiency" : "Consolidation / Transitory");
 
                 fibSummary = new FibLevelsSummary
                 {
@@ -312,7 +312,8 @@ public class MarketDataController : ControllerBase
         PredictionSummary? predSummary = null;
         if (latestFeatForPred != null)
         {
-            var pred = _predictor.Predict(latestFeatForPred, latest);
+            var readyPredictor = PredictorService.PrepareForLatest(_predictor, sortedData, features, _turningPointDetector);
+            var pred = readyPredictor.Predict(latestFeatForPred, latest);
             predSummary = new PredictionSummary
             {
                 Signal = pred.Signal,
@@ -548,7 +549,7 @@ public class MarketDataController : ControllerBase
                 latestKer = path > 0 ? netChange / path : 0m;
             }
 
-            var waveRegime = latestKer > 0.55m ? "Impulse Wave (Wave 3/5 Momentum)" : (latestKer < 0.25m ? "ABC Correction / Chop" : "Consolidation / Transitory");
+            var waveRegime = latestKer > 0.55m ? "Directional movement" : (latestKer < 0.25m ? "Low directional efficiency" : "Consolidation / Transitory");
 
             fibSummary = new FibLevelsSummary
             {
@@ -645,13 +646,12 @@ public class MarketDataController : ControllerBase
         var latestDailyFeat = dailyFeatures.LastOrDefault();
         if (latestDailyFeat != null && latestDaily != null)
         {
-            var pred = _predictor.Predict(latestDailyFeat, latestDaily);
+            var readyPredictor = PredictorService.PrepareForLatest(_predictor, dailyData, dailyFeatures, _turningPointDetector);
+            var pred = readyPredictor.Predict(latestDailyFeat, latestDaily);
 
-            // Generate 4H resolution cone (42 steps of 4h = 7 days)
-            decimal dvol = latestDaily.BtcDvol > 0 ? latestDaily.BtcDvol : 45.0m;
-            decimal sigmaDaily = (dvol / 100.0m) / (decimal)Math.Sqrt(365.0);
-            decimal driftDirection = pred.Signal == "BULLISH_OPPORTUNITY" ? 1.0m : (pred.Signal == "BEARISH_RISK" ? -1.0m : 0.0m);
-            decimal totalDrift = driftDirection * (pred.BullishProbability > 0.5m ? 0.08m : 0.08m);
+            // The direction model remains daily. This intraday overlay only illustrates volatility.
+            decimal annualVol = Math.Clamp(latestDailyFeat.RealizedVolatility30d > 0m ? latestDailyFeat.RealizedVolatility30d : 0.5m, 0.01m, 3m);
+            decimal sigmaDaily = annualVol / (decimal)Math.Sqrt(365d);
 
             long latestTimeSec = latest.UnixTimeSeconds;
             var conePoints = new List<PredictionConePoint>(42);
@@ -659,11 +659,10 @@ public class MarketDataController : ControllerBase
             for (int step = 1; step <= 42; step++)
             {
                 decimal tDays = (step * 4.0m) / 24.0m;
-                decimal driftFrac = (totalDrift * tDays) / 7.0m;
-                decimal expPrice = Math.Round(latest.Close * (1.0m + driftFrac), 2);
+                decimal expPrice = latest.Close;
                 decimal volBand = sigmaDaily * (decimal)Math.Sqrt((double)tDays);
-                decimal upper = Math.Round(expPrice * (1.0m + volBand), 2);
-                decimal lower = Math.Round(expPrice * (1.0m - volBand), 2);
+                decimal upper = Math.Round(expPrice * (decimal)Math.Exp((double)volBand), 2);
+                decimal lower = Math.Round(expPrice * (decimal)Math.Exp(-(double)volBand), 2);
 
                 conePoints.Add(new PredictionConePoint
                 {

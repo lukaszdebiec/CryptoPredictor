@@ -54,17 +54,10 @@ public class BacktestController : ControllerBase
 
         var features = _featureCalculator.Calculate(marketData);
 
-        // Ensure model is trained on history
-        if (!_predictor.IsTrained)
+        try
         {
-            var trainingDataset = _turningPointDetector.BuildTrainingDataset(marketData, features, lookaheadDays: settings.HoldingPeriodDays);
-            if (trainingDataset.Count >= 10)
-            {
-                _predictor.TrainModel(trainingDataset);
-            }
+            return Ok(_backtestEngine.RunSimulation(marketData, features, _predictor, settings));
         }
-
-        var report = _backtestEngine.RunSimulation(marketData, features, _predictor, settings);
-        return Ok(report);
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
     }
 }

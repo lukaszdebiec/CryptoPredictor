@@ -888,7 +888,7 @@
       if (labelDate) labelDate.innerText = pred.date || '--';
 
       const probPercent = (pred.bullishProbability * 100).toFixed(1);
-      if (textProb) textProb.innerText = `${probPercent}%`;
+      if (textProb) textProb.innerText = pred.validation ? `${probPercent}% (est.)` : '—';
       if (barFill) barFill.style.width = `${Math.min(100, Math.max(0, probPercent))}%`;
 
       if (heroCard && badgeSignal) {
@@ -914,7 +914,7 @@
       }
 
       if (textRegime) {
-        textRegime.innerHTML = `<strong>${escapeHtml(pred.marketRegime)}</strong> <span style="font-size:0.75rem; color:var(--text-dim);">(${escapeHtml(pred.regimeConfidence)} Confidence)</span>`;
+        textRegime.innerHTML = `<strong>${escapeHtml(pred.marketRegime)}</strong> <span style="font-size:0.75rem; color:var(--text-dim);">(${escapeHtml(pred.confidence)})</span>`;
       }
 
       // Render Key Drivers
@@ -943,6 +943,7 @@
       const invVal = document.getElementById('pred-invalidation-val');
       const rrVal = document.getElementById('pred-rr-val');
 
+      if (targetsRow) targetsRow.style.display = 'none';
       if (targetsRow && pred.targetPrice > 0) {
         targetsRow.style.display = 'flex';
         const isBearish = pred.signal === 'BEARISH_RISK';
@@ -968,6 +969,8 @@
       const ensembleVerdictText = document.getElementById('ensemble-verdict-text');
       const ensembleVotesList = document.getElementById('ensemble-votes-list');
 
+      if (badgeConsensus) badgeConsensus.style.display = 'none';
+      if (ensembleBox) ensembleBox.style.display = 'none';
       if (pred.ensemble) {
         const ens = pred.ensemble;
         if (badgeConsensus) {
@@ -1138,6 +1141,8 @@
       cachedJournalStats = data.stats;
       cachedJournalItems = data.items || [];
 
+      const subtitle = document.getElementById('journal-mode-subtitle');
+      if (subtitle) subtitle.textContent = `${data.stats.noTradePredictions || 0} prognoz bez transakcji; ${data.stats.unavailableOutcomes || 0} wyników z brakującymi danymi. Sumy sygnałów nie są zwrotem portfela.`;
       // Recompute and render with active conviction, execution mode, and filters
       recalculateAndRenderJournal();
 
@@ -1150,90 +1155,12 @@
   }
 
   function getActiveFilteredDataset() {
-    if (!cachedJournalItems || cachedJournalItems.length === 0) return [];
-
-    let dataset = cachedJournalItems;
-
-    if (currentExecutionMode === 'discrete') {
-      // Discrete single-position simulation: sort oldest to newest, take first valid trade, skip holding period
-      const sorted = [...cachedJournalItems].sort((a, b) => (a.date > b.date ? 1 : -1));
-      const discreteTrades = [];
-      let idx = 0;
-      while (idx < sorted.length) {
-        const it = sorted[idx];
-        const prob = Number(it.bullishProbability);
-        const meetsConv = (prob >= currentConvictionThreshold) || (prob <= (1.0 - currentConvictionThreshold));
-        const meetsCons = currentConsensusFilter === 'strong'
-          ? (it.consensusVerdict && (it.consensusVerdict.includes('Strong') || it.consensusVerdict.includes('Unanimous')) && (it.consensusAgreementPercent >= 60))
-          : true;
-
-        if (meetsConv && meetsCons && it.signal !== 'NEUTRAL_HOLD') {
-          discreteTrades.push(it);
-          const skipDays = it.outcomeStatus !== 'PENDING' ? Math.max(1, it.elapsedDays || 1) : 1;
-          idx += skipDays;
-        } else {
-          idx++;
-        }
-      }
-      dataset = discreteTrades;
-    } else {
-      // Rolling mode: every candidate day meeting conviction and consensus
-      dataset = dataset.filter(it => {
-        const prob = Number(it.bullishProbability);
-        const meetsConv = (prob >= currentConvictionThreshold) || (prob <= (1.0 - currentConvictionThreshold));
-        const meetsCons = currentConsensusFilter === 'strong'
-          ? (it.consensusVerdict && (it.consensusVerdict.includes('Strong') || it.consensusVerdict.includes('Unanimous')) && (it.consensusAgreementPercent >= 60))
-          : true;
-        return meetsConv && meetsCons && it.signal !== 'NEUTRAL_HOLD';
-      });
-    }
-
-    return dataset;
+    return CryptoJournal.select(cachedJournalItems || [], currentConvictionThreshold, currentExecutionMode);
   }
 
   function recalculateAndRenderJournal() {
     const activeDataset = getActiveFilteredDataset();
-
-    // Recompute 5 KPI cards in real-time
-    const resolved = activeDataset.filter(i => i.outcomeStatus !== 'PENDING');
-    const pending = activeDataset.filter(i => i.outcomeStatus === 'PENDING');
-    const targetHits = resolved.filter(i => i.outcomeStatus === 'TARGET_HIT');
-    const invalidations = resolved.filter(i => i.outcomeStatus === 'INVALIDATED');
-    const expiredProfits = resolved.filter(i => i.outcomeStatus === 'EXPIRED_PROFIT');
-    const expiredLosses = resolved.filter(i => i.outcomeStatus === 'EXPIRED_LOSS');
-
-    const wins = targetHits.length + expiredProfits.length;
-    const winRate = resolved.length > 0 ? (wins / resolved.length * 100) : 0;
-    const targetHitRate = resolved.length > 0 ? (targetHits.length / resolved.length * 100) : 0;
-
-    let totalGains = 0;
-    let totalLosses = 0;
-    let cumPnl = 0;
-
-    resolved.forEach(r => {
-      const ret = Number(r.realizedReturnPercent || 0);
-      cumPnl += ret * 100;
-      if (ret > 0) totalGains += ret;
-      else if (ret < 0) totalLosses += Math.abs(ret);
-    });
-
-    const profitFactor = totalLosses > 0 ? (totalGains / totalLosses) : (totalGains > 0 ? 99 : 1);
-
-    const statsObj = {
-      totalPredictions: activeDataset.length,
-      resolvedPredictions: resolved.length,
-      pendingPredictions: pending.length,
-      targetHits: targetHits.length,
-      invalidations: invalidations.length,
-      expiredProfits: expiredProfits.length,
-      expiredLosses: expiredLosses.length,
-      winRatePercent: winRate,
-      targetHitRatePercent: targetHitRate,
-      profitFactor: profitFactor,
-      cumulativeReturnPercent: cumPnl
-    };
-
-    updateJournalStatsUI(statsObj);
+    updateJournalStatsUI(CryptoJournal.statistics(activeDataset));
     updateJournalFilterCounts(activeDataset);
     filterAndRenderJournalTable(activeDataset);
   }
@@ -1255,7 +1182,7 @@
       elTargetRate.style.color = stats.targetHitRatePercent >= 35 ? '#34d399' : 'var(--text-main)';
     }
     if (elProfitFactor) {
-      elProfitFactor.innerText = stats.resolvedPredictions > 0 ? Number(stats.profitFactor).toFixed(2) : '--';
+      elProfitFactor.innerText = stats.profitFactor != null ? Number(stats.profitFactor).toFixed(2) : '--';
       elProfitFactor.style.color = stats.profitFactor >= 1.4 ? '#34d399' : (stats.profitFactor < 1.0 ? '#fb7185' : 'var(--text-main)');
     }
     if (elCumPnl) {
@@ -1352,15 +1279,7 @@
 
       // Conviction Badge & Consensus summary
       const prob = Number(item.bullishProbability || 0.5);
-      const convSpread = Math.abs(prob - 0.50) * 2;
-      let convBadgeHtml = '';
-      if (convSpread >= 0.40) {
-        convBadgeHtml = `<span class="conv-tag high" title="Wysoka siła przekonania (prob ${(prob*100).toFixed(0)}%)">🔥 ${(convSpread * 100).toFixed(0)}% Conv</span>`;
-      } else if (convSpread >= 0.20) {
-        convBadgeHtml = `<span class="conv-tag mid" title="Umiarkowana siła przekonania">⚡ ${(convSpread * 100).toFixed(0)}% Conv</span>`;
-      } else {
-        convBadgeHtml = `<span class="conv-tag low" title="Niska siła przekonania (szum)">⚠️ ${(convSpread * 100).toFixed(0)}% Conv</span>`;
-      }
+      const convBadgeHtml = `<span class="conv-tag mid" title="Estymata modelu; brak potwierdzonej kalibracji">P(wzrost 7D): ${(prob * 100).toFixed(1)}%</span>`;
 
       let consensusHtml = '<span style="color:var(--text-dim); font-size:0.75rem;">--</span>';
       if (item.consensusVerdict) {
@@ -1453,9 +1372,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           holdingPeriodDays: 7,
-          stopLossPercent: 0.04,
-          takeProfitPercent: 0.08,
-          probabilityThreshold: 0.65
+          entryProbabilityThreshold: 0.60
         })
       });
 
@@ -1463,12 +1380,12 @@
 
       const report = await res.json();
 
-      const winRate = report.winRatePercent != null ? report.winRatePercent.toFixed(1) + '%' : (report.winRate ? (report.winRate * 100).toFixed(1) + '%' : 'N/A');
+      const winRate = report.totalTrades > 0 && report.winRatePercent != null ? report.winRatePercent.toFixed(1) + '%' : '—';
       const maxDd = report.strategyMaxDrawdownPercent != null ? report.strategyMaxDrawdownPercent.toFixed(1) + '%' : (report.maxDrawdown ? (report.maxDrawdown * 100).toFixed(1) + '%' : 'N/A');
 
       document.getElementById('bt-winrate').innerText = winRate;
-      document.getElementById('bt-profitfactor').innerText = report.profitFactor != null ? report.profitFactor.toFixed(2) : 'N/A';
-      document.getElementById('bt-sharpe').innerText = report.sharpeRatio != null ? report.sharpeRatio.toFixed(2) : 'N/A';
+      document.getElementById('bt-profitfactor').innerText = report.profitFactorValue != null ? report.profitFactorValue.toFixed(2) : 'N/A';
+      document.getElementById('bt-sharpe').innerText = report.totalTrades > 0 && report.sharpeRatio != null ? report.sharpeRatio.toFixed(2) : '—';
       document.getElementById('bt-drawdown').innerText = maxDd;
 
       showToast(`Backtest completed! Trades: ${report.trades.length}, Win Rate: ${winRate}`, 'success');
@@ -1637,7 +1554,7 @@
         if (currentJournalMode === 'historical') return;
         btnJHist.classList.add('active');
         btnJLive.classList.remove('active');
-        if (subTitle) subTitle.textContent = 'Empiryczna weryfikacja modeli AI na danych historycznych (~180 dni, okno kroczące bez wycieku w przyszłość)';
+        if (subTitle) subTitle.textContent = 'Historyczne prognozy kierunku 7D; dzienne trenowanie wyłącznie na znanych wynikach';
         loadHistoricalPredictions('historical');
       });
 
@@ -2094,38 +2011,23 @@
         sigEl.className = 'signal-badge ' + (data.prediction.signal === 'BULLISH_OPPORTUNITY' ? 'bullish' : data.prediction.signal === 'BEARISH_RISK' ? 'bearish' : 'neutral');
       }
       if (regEl) regEl.textContent = data.prediction.marketRegime || 'Consolidation';
-      if (probEl) probEl.textContent = `${(data.prediction.bullishProbability * 100).toFixed(1)}%`;
+      if (probEl) probEl.textContent = data.prediction.validation ? `${(data.prediction.bullishProbability * 100).toFixed(1)}% (est.)` : '—';
       if (consEl) {
-        consEl.textContent = data.prediction.ensemble ? data.prediction.ensemble.consensusVerdict : 'Model Council';
+        consEl.textContent = data.prediction.predictionStatus || 'Direction estimate';
       }
 
-      // Priority 17: Conviction Tag & Noise Warning
-      const tmProb = Number(data.prediction.bullishProbability || 0.5);
-      const tmConvSpread = Math.abs(tmProb - 0.50) * 2;
       const convTagEl = document.getElementById('tm-banner-conviction');
       const convWarnEl = document.getElementById('tm-conviction-warning');
-
       if (convTagEl) {
         convTagEl.style.display = 'inline-flex';
-        if (tmConvSpread >= 0.40) {
-          convTagEl.className = 'conv-tag high';
-          convTagEl.textContent = `🔥 ${(tmConvSpread * 100).toFixed(0)}% Conv`;
-        } else if (tmConvSpread >= 0.20) {
-          convTagEl.className = 'conv-tag mid';
-          convTagEl.textContent = `⚡ ${(tmConvSpread * 100).toFixed(0)}% Conv`;
-        } else {
-          convTagEl.className = 'conv-tag low';
-          convTagEl.textContent = `⚠️ ${(tmConvSpread * 100).toFixed(0)}% Conv (Szum)`;
-        }
+        convTagEl.className = 'conv-tag mid';
+        convTagEl.textContent = 'Estymata bez potwierdzonej kalibracji';
       }
+      if (convWarnEl) convWarnEl.style.display = 'none';
 
-      if (convWarnEl) {
-        convWarnEl.style.display = tmConvSpread < 0.20 ? 'flex' : 'none';
-      }
-
-      if (tpEl) tpEl.textContent = `🎯 TP: $${tp.toLocaleString()} (${(data.prediction.targetChangePercent * 100).toFixed(1)}%)`;
-      if (slEl) slEl.textContent = `🛑 SL: $${sl.toLocaleString()} (${(data.prediction.invalidationChangePercent * 100).toFixed(1)}%)`;
-      if (rrEl) rrEl.textContent = `R:R ${data.prediction.riskRewardRatio || 2.0}`;
+      if (tpEl) tpEl.textContent = tp > 0 ? `🎯 TP: $${tp.toLocaleString()} (${(data.prediction.targetChangePercent * 100).toFixed(1)}%)` : 'TP: brak pozycji';
+      if (slEl) slEl.textContent = sl > 0 ? `🛑 SL: $${sl.toLocaleString()} (${(data.prediction.invalidationChangePercent * 100).toFixed(1)}%)` : 'SL: brak pozycji';
+      if (rrEl) rrEl.textContent = `R:R ${data.prediction.riskRewardRatio || '—'}`;
 
       const fCount = data.forwardCandles ? data.forwardCandles.length : 0;
       if (statusText) statusText.textContent = `Gotowy do odtworzenia. Czeka ${fCount} świec przyszłości.`;
@@ -2278,13 +2180,13 @@
     if (outcome === 'TARGET_HIT') {
       badgeClass = 'tp-hit';
       badgeText = '🎯 TARGET HIT';
-      titleText = 'Sukces Modelu: Osiągnięto Poziom Take-Profit!';
+      titleText = 'Osiągnięto poziom Take-Profit';
       desc = `Kurs Bitcoina osiągnął docelowy poziom TP ($${Number(res.resolvedPrice || 0).toLocaleString()}) w dniu ${hitDay}/7 od momentu wygenerowania sygnału.`;
     } else if (outcome === 'INVALIDATED') {
       badgeClass = 'sl-hit';
       badgeText = '🛑 SL HIT';
       titleText = 'Unieważnienie: Naruszenie Poziomu Stop-Loss';
-      desc = `Rynek wybił przeciwny poziom unieważnienia ($${Number(res.resolvedPrice || 0).toLocaleString()}) w dniu ${hitDay}/7. Strata ograniczona do założonego buforu.`;
+      desc = `Rynek wybił przeciwny poziom unieważnienia ($${Number(res.resolvedPrice || 0).toLocaleString()}) w dniu ${hitDay}/7. Wynik uwzględnia założone koszty i możliwą lukę na otwarciu.`;
     } else if (outcome === 'EXPIRED_PROFIT') {
       badgeClass = 'exp-profit';
       badgeText = '⏱️ EXPIRED (+%)';
@@ -2295,6 +2197,17 @@
       badgeText = '⏱️ EXPIRED (-%)';
       titleText = 'Zamknięcie na minusie po upływie 7 dni';
       desc = `Po 7 dniach kurs nie wybił TP ani SL, zamykając się z niewielkim ujemnym wynikiem.`;
+    }
+
+    if (outcome === 'NO_TRADE') {
+      badgeText = 'BRAK TRANSAKCJI';
+      titleText = 'Model powstrzymał się od aktywnego sygnału';
+      desc = 'Brak pozycji oznacza zerowy wynik transakcyjny. Nie jest liczony jako trafna prognoza kierunku.';
+    } else if (outcome === 'DATA_UNAVAILABLE') {
+      badgeText = 'BRAK DANYCH';
+      desc = 'Niepełna historia uniemożliwia rzetelne rozliczenie.';
+    } else if (outcome === 'PENDING') {
+      desc = 'Horyzont prognozy jeszcze się nie zakończył i nie osiągnięto żadnej bariery.';
     }
 
     if (badgeEl) {
@@ -2324,10 +2237,10 @@
     }
 
     if (verdictEl) {
-      const wasAcc = (data.prediction.signal === 'BULLISH_OPPORTUNITY' && res.outcomeStatus === 'TARGET_HIT') ||
-                     (data.prediction.signal === 'BEARISH_RISK' && res.outcomeStatus === 'TARGET_HIT');
-      verdictEl.textContent = wasAcc ? 'Trafny kierunek (Zwycięstwo)' : (outcome === 'INVALIDATED' ? 'Nietrafny (Zadziałał Stop-Loss)' : 'Ruch neutralny');
-      verdictEl.style.color = wasAcc ? '#10b981' : (outcome === 'INVALIDATED' ? '#f43f5e' : '#fbbf24');
+      const actual = data.actualHistoricalOutcome || {};
+      const wasAcc = data.prediction.signal === 'BULLISH_OPPORTUNITY' ? actual.wasBullishPredictionAccurate : actual.wasBearishPredictionAccurate;
+      verdictEl.textContent = wasAcc === true ? 'Kierunek 7D: trafny' : wasAcc === false ? 'Kierunek 7D: nietrafny' : 'Brak oceny kierunku';
+      verdictEl.style.color = wasAcc === true ? '#10b981' : wasAcc === false ? '#f43f5e' : '#fbbf24';
     }
 
     outcomeCard.style.display = 'block';

@@ -3,14 +3,31 @@ namespace CryptoPredictor.Prediction;
 public sealed record ModelTrainingMetrics
 {
     public double Accuracy { get; init; }
-    public double AreaUnderRocCurve { get; init; }
+    public double? AreaUnderRocCurve { get; init; }
     public double F1Score { get; init; }
     public double PositivePrecision { get; init; }
     public double PositiveRecall { get; init; }
     public int TrainingSampleCount { get; init; }
-    public double FastTreeAuc { get; init; }
-    public double FastForestAuc { get; init; }
-    public double LogisticAuc { get; init; }
+    public double? FastTreeAuc { get; init; }
+    public double? FastForestAuc { get; init; }
+    public double? LogisticAuc { get; init; }
+    public int ValidationSampleCount { get; init; }
+    public int RefitSampleCount { get; init; }
+    public string TrainingDataFingerprint { get; init; } = "";
+    public double BrierScore { get; init; }
+    public double LogLoss { get; init; }
+    public double BaselineBrierScore { get; init; }
+    public double BaselineLogLoss { get; init; }
+    public double AlwaysUpAccuracy { get; init; }
+    public double MajorityBaselineAccuracy { get; init; }
+    public bool PassesValidation { get; init; }
+    public DateOnly TrainingStart { get; init; }
+    public DateOnly TrainingEnd { get; init; }
+    public DateOnly TrainingOutcomeEnd { get; init; }
+    public DateOnly ValidationStart { get; init; }
+    public DateOnly ValidationEnd { get; init; }
+    public DateOnly DataThroughDate { get; init; }
+    public string ModelVersion { get; init; } = PredictionPolicy.Version;
 }
 
 public sealed record PredictionConePoint
@@ -49,6 +66,14 @@ public sealed record EnsembleConsensusDetails
 
 public sealed record MarketPrediction
 {
+    public string ModelVersion { get; init; } = "legacy";
+    public DateTime GeneratedAtUtc { get; init; }
+    public string PredictionStatus { get; init; } = "LEGACY";
+    public string ProbabilityMeaning { get; init; } = PredictionPolicy.ProbabilityMeaning;
+    public bool ProbabilityIsCalibrated { get; init; }
+    public ModelTrainingMetrics? Validation { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? FeatureSnapshotJson { get; init; }
     public DateOnly Date { get; init; }
     public decimal BtcClose { get; init; }
 
@@ -77,6 +102,8 @@ public sealed record MarketPrediction
 
 public sealed record PredictionJournalItem
 {
+    public string ModelVersion { get; init; } = "legacy";
+    public string PredictionStatus { get; init; } = "LEGACY";
     public DateOnly Date { get; init; }
     public decimal BtcClose { get; init; }
     public string Signal { get; init; } = default!;
@@ -100,10 +127,19 @@ public sealed record PredictionJournalItem
     public DateOnly? ResolvedDate { get; init; }
     public decimal? ResolvedPrice { get; init; }
     public int ElapsedDays { get; init; }
+    public decimal? ForwardReturn7d { get; init; }
+    public bool? DirectionCorrect { get; init; }
+    public string? ExitReason { get; init; }
 }
 
 public sealed record LiveJournalStats
 {
+    public int NoTradePredictions { get; init; }
+    public int UnavailableOutcomes { get; init; }
+    public int DirectionEvaluatedCount { get; init; }
+    public decimal? DirectionAccuracyPercent { get; init; }
+    public decimal? AlwaysUpAccuracyPercent { get; init; }
+    public decimal? ProfitFactorValue { get; init; }
     public int TotalPredictions { get; init; }
     public int ResolvedPredictions { get; init; }
     public int PendingPredictions { get; init; }

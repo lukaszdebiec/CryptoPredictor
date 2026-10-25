@@ -1,1039 +1,298 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using CryptoPredictor.Backtest;
 using CryptoPredictor.Data;
 using Microsoft.ML;
 
 namespace CryptoPredictor.Prediction;
 
-public class PredictorService : IPredictorService
+/// <summary>
+/// A deliberately small directional baseline. Optional external feeds remain available to the
+/// dashboard but cannot enter this model until their point-in-time coverage has been validated.
+/// </summary>
+public class PredictorService : IPredictorService, IDisposable
 {
-    private readonly MLContext _mlContext = new(seed: 42);
-    private ITransformer? _fastTreeModel;
-    private PredictionEngine<ModelInput, ModelOutput>? _fastTreeEngine;
-
-    private ITransformer? _fastForestModel;
-    private PredictionEngine<ModelInput, ModelOutput>? _fastForestEngine;
-
-    private ITransformer? _logisticModel;
-    private PredictionEngine<ModelInput, ModelOutput>? _logisticEngine;
-
     private readonly object _lock = new();
+    private readonly object _trainingLock = new();
+    private PredictionEngine<ModelInput, ModelOutput>? _engine;
+    private ModelTrainingMetrics? _metrics;
+    private static readonly object CacheLock = new();
+    private static (string Fingerprint, IReadOnlyList<MarketPrediction> Predictions)? _cachedWalkForward;
 
-    public bool IsTrained => _fastTreeModel != null;
-    public ModelTrainingMetrics? LastTrainingMetrics { get; private set; }
+    public bool IsTrained { get { lock (_lock) return _engine != null; } }
+    public ModelTrainingMetrics? LastTrainingMetrics { get { lock (_lock) return _metrics; } }
+
+    private static readonly string[] FeatureColumns =
+    [
+        nameof(ModelInput.BtcReturn1d), nameof(ModelInput.BtcReturn3d), nameof(ModelInput.BtcReturn7d),
+        nameof(ModelInput.BtcReturn30d), nameof(ModelInput.BtcDrawdownFrom30dHigh),
+        nameof(ModelInput.RealizedVolatility7d), nameof(ModelInput.RealizedVolatility30d),
+        nameof(ModelInput.VolumeVs30dAverage), nameof(ModelInput.KaufmanEfficiencyRatio10d),
+        nameof(ModelInput.WeeklyTrendBias)
+    ];
+
+    private static ModelInput Input(DailyFeatures f, bool label = false) => new()
+    {
+        BtcReturn1d = (float)f.BtcReturn1d, BtcReturn3d = (float)f.BtcReturn3d,
+        BtcReturn7d = (float)f.BtcReturn7d, BtcReturn30d = (float)f.BtcReturn30d,
+        BtcDrawdownFrom30dHigh = (float)f.BtcDrawdownFrom30dHigh,
+        RealizedVolatility7d = (float)f.RealizedVolatility7d, RealizedVolatility30d = (float)f.RealizedVolatility30d,
+        VolumeVs30dAverage = (float)f.VolumeVs30dAverage,
+        KaufmanEfficiencyRatio10d = (float)f.KaufmanEfficiencyRatio10d,
+        WeeklyTrendBias = (float)f.WeeklyTrendBias, Label = label
+    };
 
     public ModelTrainingMetrics TrainModel(IReadOnlyList<ModelTrainingSample> dataset)
     {
-        if (dataset == null || dataset.Count < 10)
+        lock (_trainingLock)
         {
-            throw new ArgumentException("Dataset must contain at least 10 observations to train a model.");
-        }
+            var sorted = dataset.OrderBy(s => s.Date).ToList();
+            if (sorted.Count < PredictionPolicy.MinimumDatasetSamples)
+                throw new ArgumentException($"At least {PredictionPolicy.MinimumDatasetSamples} eligible observations are required after warmup and labeling.");
+            if (sorted.Select(s => s.Date).Distinct().Count() != sorted.Count ||
+                sorted.Any(s => s.HorizonDays != PredictionPolicy.HorizonDays || s.OutcomeDate != s.Date.AddDays(PredictionPolicy.HorizonDays)))
+                throw new ArgumentException("Training samples must be unique, dated 7-day directional outcomes.");
 
-        var inputs = dataset.Select(s => new ModelInput
-        {
-            BtcReturn1d = (float)s.Features.BtcReturn1d,
-            BtcReturn3d = (float)s.Features.BtcReturn3d,
-            BtcReturn7d = (float)s.Features.BtcReturn7d,
-            BtcReturn30d = (float)s.Features.BtcReturn30d,
-            BtcDrawdownFrom30dHigh = (float)s.Features.BtcDrawdownFrom30dHigh,
-            BtcDrawdownFromAth = (float)s.Features.BtcDrawdownFromAth,
-            RealizedVolatility7d = (float)s.Features.RealizedVolatility7d,
-            RealizedVolatility30d = (float)s.Features.RealizedVolatility30d,
-            VolumeVs30dAverage = (float)s.Features.VolumeVs30dAverage,
-            OiChange1d = (float)s.Features.OiChange1d,
-            OiChange7d = (float)s.Features.OiChange7d,
-            OiZScore30d = (float)s.Features.OiZScore30d,
-            FundingZScore30d = (float)s.Features.FundingZScore30d,
-            FundingZScore90d = (float)s.Features.FundingZScore90d,
-            DvolZScore30d = (float)s.Features.DvolZScore30d,
-            EtfFlow7d = (float)(s.Features.EtfFlow7d / 1_000_000m), // in millions USD
-            EtfFlowZScore30d = (float)s.Features.EtfFlowZScore30d,
-            FibRetracementRatio30d = (float)s.Features.FibRetracementRatio30d,
-            DistToGoldenPocket30d = (float)s.Features.DistToGoldenPocket30d,
-            KaufmanEfficiencyRatio10d = (float)s.Features.KaufmanEfficiencyRatio10d,
-            WeeklyTrendBias = (float)s.Features.WeeklyTrendBias,
-            DxyReturn7d = (float)s.Features.DxyReturn7d,
-            DxyZScore30d = (float)s.Features.DxyZScore30d,
-            Us10YYieldChange7d = (float)s.Features.Us10YYieldChange7d,
-            Sp500Return7d = (float)s.Features.Sp500Return7d,
-            DistToLowerLiquidityWall = (float)s.Features.DistToLowerLiquidityWall,
-            DistToUpperLiquidityWall = (float)s.Features.DistToUpperLiquidityWall,
-            IsLongLiquiditySwept = s.Features.IsLongLiquiditySwept ? 1f : 0f,
-            IsShortLiquiditySwept = s.Features.IsShortLiquiditySwept ? 1f : 0f,
-            FearGreedIndex = s.Label.IsLocalBottom ? 20f : 50f,
-            CoinbasePremium = 0f,
-            Label = s.Label.IsTripleBarrierBullish ?? s.Label.IsForward7dBullish ?? (s.Label.ForwardReturn7d > 0.02m)
-        }).ToList();
+            int splitIndex = (int)(sorted.Count * 0.8);
+            var validation = sorted.Skip(splitIndex).ToList();
+            // Purge labels whose outcomes touch or cross the beginning of validation.
+            var fit = sorted.Take(splitIndex).Where(s => s.OutcomeDate < validation[0].Date).ToList();
+            if (fit.Count < PredictionPolicy.MinimumFitSamples || fit.Select(s => s.ForwardReturn > 0m).Distinct().Count() < 2)
+                throw new ArgumentException("Insufficient chronological training samples or only one training class.");
 
-        var dataView = _mlContext.Data.LoadFromEnumerable(inputs);
-
-        var featureColumns = new[]
-        {
-            nameof(ModelInput.BtcReturn1d),
-            nameof(ModelInput.BtcReturn3d),
-            nameof(ModelInput.BtcReturn7d),
-            nameof(ModelInput.BtcReturn30d),
-            nameof(ModelInput.BtcDrawdownFrom30dHigh),
-            nameof(ModelInput.BtcDrawdownFromAth),
-            nameof(ModelInput.RealizedVolatility7d),
-            nameof(ModelInput.RealizedVolatility30d),
-            nameof(ModelInput.VolumeVs30dAverage),
-            nameof(ModelInput.OiChange1d),
-            nameof(ModelInput.OiChange7d),
-            nameof(ModelInput.OiZScore30d),
-            nameof(ModelInput.FundingZScore30d),
-            nameof(ModelInput.FundingZScore90d),
-            nameof(ModelInput.DvolZScore30d),
-            nameof(ModelInput.EtfFlow7d),
-            nameof(ModelInput.EtfFlowZScore30d),
-            nameof(ModelInput.FibRetracementRatio30d),
-            nameof(ModelInput.DistToGoldenPocket30d),
-            nameof(ModelInput.KaufmanEfficiencyRatio10d),
-            nameof(ModelInput.WeeklyTrendBias),
-            nameof(ModelInput.DxyReturn7d),
-            nameof(ModelInput.DxyZScore30d),
-            nameof(ModelInput.Us10YYieldChange7d),
-            nameof(ModelInput.Sp500Return7d),
-            nameof(ModelInput.DistToLowerLiquidityWall),
-            nameof(ModelInput.DistToUpperLiquidityWall),
-            nameof(ModelInput.IsLongLiquiditySwept),
-            nameof(ModelInput.IsShortLiquiditySwept)
-        };
-
-        // Train / test split (80% train, 20% test)
-        var split = _mlContext.Data.TrainTestSplit(dataView, testFraction: 0.2, seed: 42);
-
-        var featurePipeline = _mlContext.Transforms.Concatenate("Features", featureColumns)
-            .Append(_mlContext.Transforms.NormalizeMinMax("Features"));
-
-        // 1. Train FastTree (Gradient Boosted Decision Trees)
-        var fastTreePipeline = featurePipeline.Append(_mlContext.BinaryClassification.Trainers.FastTree(
-            labelColumnName: nameof(ModelInput.Label),
-            featureColumnName: "Features",
-            numberOfLeaves: 8,
-            numberOfTrees: 20,
-            minimumExampleCountPerLeaf: 2));
-        var fastTreeModel = fastTreePipeline.Fit(split.TrainSet);
-        var fastTreePreds = fastTreeModel.Transform(split.TestSet);
-        double ftAuc = 0.72;
-        try
-        {
-            var fastTreeMetrics = _mlContext.BinaryClassification.Evaluate(fastTreePreds, labelColumnName: nameof(ModelInput.Label));
-            ftAuc = double.IsNaN(fastTreeMetrics.AreaUnderRocCurve) ? 0.72 : fastTreeMetrics.AreaUnderRocCurve;
-        }
-        catch { }
-
-        // 2. Train FastForest (Random Forest)
-        var fastForestPipeline = featurePipeline.Append(_mlContext.BinaryClassification.Trainers.FastForest(
-            labelColumnName: nameof(ModelInput.Label),
-            featureColumnName: "Features",
-            numberOfLeaves: 8,
-            numberOfTrees: 25,
-            minimumExampleCountPerLeaf: 2));
-        var fastForestModel = fastForestPipeline.Fit(split.TrainSet);
-        var fastForestPreds = fastForestModel.Transform(split.TestSet);
-
-        double ffAuc = 0.70;
-        try
-        {
-            var fastForestMetrics = _mlContext.BinaryClassification.EvaluateNonCalibrated(fastForestPreds, labelColumnName: nameof(ModelInput.Label));
-            ffAuc = double.IsNaN(fastForestMetrics.AreaUnderRocCurve) ? 0.70 : fastForestMetrics.AreaUnderRocCurve;
-        }
-        catch { }
-
-        // 3. Train SdcaLogisticRegression (Linear GLM)
-        var logisticPipeline = featurePipeline.Append(_mlContext.BinaryClassification.Trainers.SdcaLogisticRegression(
-            labelColumnName: nameof(ModelInput.Label),
-            featureColumnName: "Features",
-            maximumNumberOfIterations: 50));
-        var logisticModel = logisticPipeline.Fit(split.TrainSet);
-        var logisticPreds = logisticModel.Transform(split.TestSet);
-
-        double logAuc = 0.65;
-        try
-        {
-            var logisticMetrics = _mlContext.BinaryClassification.Evaluate(logisticPreds, labelColumnName: nameof(ModelInput.Label));
-            logAuc = double.IsNaN(logisticMetrics.AreaUnderRocCurve) ? 0.65 : logisticMetrics.AreaUnderRocCurve;
-        }
-        catch { }
-
-        lock (_lock)
-        {
-            _fastTreeModel = fastTreeModel;
-            _fastTreeEngine = _mlContext.Model.CreatePredictionEngine<ModelInput, ModelOutput>(fastTreeModel);
-
-            _fastForestModel = fastForestModel;
-            _fastForestEngine = _mlContext.Model.CreatePredictionEngine<ModelInput, ModelOutput>(fastForestModel);
-
-            _logisticModel = logisticModel;
-            _logisticEngine = _mlContext.Model.CreatePredictionEngine<ModelInput, ModelOutput>(logisticModel);
-
-            LastTrainingMetrics = new ModelTrainingMetrics
+            var ml = new MLContext(seed: 42);
+            // A fixed regularized model; no model selection or threshold optimization on this holdout.
+            var pipeline = ml.Transforms.Concatenate("Features", FeatureColumns)
+                .Append(ml.Transforms.NormalizeMeanVariance("Features"))
+                .Append(ml.BinaryClassification.Trainers.LbfgsLogisticRegression(
+                    labelColumnName: nameof(ModelInput.Label), featureColumnName: "Features",
+                    l1Regularization: 0.01f, l2Regularization: 1f));
+            var candidate = pipeline.Fit(ml.Data.LoadFromEnumerable(fit.Select(s => Input(s.Features, s.ForwardReturn > 0m))));
+            using var validationEngine = ml.Model.CreatePredictionEngine<ModelInput, ModelOutput>(candidate);
+            var outcomes = validation.Select(s => s.ForwardReturn > 0m).ToArray();
+            var probabilities = validation.Select(s => (double)validationEngine.Predict(Input(s.Features)).Probability).ToArray();
+            if (probabilities.Any(p => !double.IsFinite(p) || p < 0d || p > 1d))
+                throw new InvalidOperationException("The model produced an invalid probability during validation.");
+            double baseRate = fit.Count(s => s.ForwardReturn > 0m) / (double)fit.Count;
+            var metrics = Evaluate(probabilities, outcomes, baseRate) with
             {
-                Accuracy = 0.75,
-                AreaUnderRocCurve = ftAuc,
-                F1Score = 0.70,
-                PositivePrecision = 0.70,
-                PositiveRecall = 0.75,
-                TrainingSampleCount = inputs.Count,
-                FastTreeAuc = Math.Round(ftAuc, 3),
-                FastForestAuc = Math.Round(ffAuc, 3),
-                LogisticAuc = Math.Round(logAuc, 3)
+                TrainingSampleCount = fit.Count, ValidationSampleCount = validation.Count, RefitSampleCount = sorted.Count,
+                TrainingDataFingerprint = TrainingFingerprint(sorted),
+                TrainingStart = fit[0].Date, TrainingEnd = fit[^1].Date, TrainingOutcomeEnd = fit.Max(s => s.OutcomeDate),
+                ValidationStart = validation[0].Date, ValidationEnd = validation[^1].Date,
+                DataThroughDate = sorted.Max(s => s.OutcomeDate)
             };
+            // The holdout describes the earlier candidate. Refit the fixed specification on all
+            // currently known labels for inference; do not describe this refit's in-sample fit as validation.
+            var finalModel = pipeline.Fit(ml.Data.LoadFromEnumerable(sorted.Select(s => Input(s.Features, s.ForwardReturn > 0m))));
+            var finalEngine = ml.Model.CreatePredictionEngine<ModelInput, ModelOutput>(finalModel);
+            lock (_lock)
+            {
+                _engine?.Dispose();
+                _engine = finalEngine;
+                _metrics = metrics;
+            }
+            return metrics;
         }
+    }
 
-        return LastTrainingMetrics;
+    private static ModelTrainingMetrics Evaluate(double[] p, bool[] labels, double baseRate)
+    {
+        int n = p.Length, tp = 0, fp = 0, fn = 0;
+        int correct = 0, majorityCorrect = 0;
+        double brier = 0d, logLoss = 0d, baselineBrier = 0d, baselineLogLoss = 0d;
+        baseRate = Math.Clamp(baseRate, 1e-6, 1d - 1e-6);
+        for (int i = 0; i < n; i++)
+        {
+            bool guess = p[i] >= 0.5d;
+            double y = labels[i] ? 1d : 0d, prob = Math.Clamp(p[i], 1e-6, 1d - 1e-6);
+            if (guess == labels[i]) correct++;
+            if ((baseRate >= 0.5d) == labels[i]) majorityCorrect++;
+            if (guess && labels[i]) tp++;
+            if (guess && !labels[i]) fp++;
+            if (!guess && labels[i]) fn++;
+            brier += Math.Pow(p[i] - y, 2);
+            logLoss -= y * Math.Log(prob) + (1d - y) * Math.Log(1d - prob);
+            baselineBrier += Math.Pow(baseRate - y, 2);
+            baselineLogLoss -= y * Math.Log(baseRate) + (1d - y) * Math.Log(1d - baseRate);
+        }
+        var positives = Enumerable.Range(0, n).Where(i => labels[i]).ToList();
+        var negatives = Enumerable.Range(0, n).Where(i => !labels[i]).ToList();
+        double? auc = positives.Count > 0 && negatives.Count > 0
+            ? positives.Sum(i => negatives.Sum(j => p[i] > p[j] ? 1d : p[i] == p[j] ? 0.5d : 0d)) / (positives.Count * (double)negatives.Count)
+            : null;
+        return new ModelTrainingMetrics
+        {
+            Accuracy = correct / (double)n,
+            PositivePrecision = tp + fp > 0 ? tp / (double)(tp + fp) : 0d,
+            PositiveRecall = tp + fn > 0 ? tp / (double)(tp + fn) : 0d,
+            F1Score = 2 * tp + fp + fn > 0 ? 2d * tp / (2 * tp + fp + fn) : 0d,
+            AreaUnderRocCurve = auc, LogisticAuc = auc,
+            BrierScore = brier / n, LogLoss = logLoss / n,
+            BaselineBrierScore = baselineBrier / n, BaselineLogLoss = baselineLogLoss / n,
+            AlwaysUpAccuracy = positives.Count / (double)n, MajorityBaselineAccuracy = majorityCorrect / (double)n,
+            // A conservative research gate, not proof of significance or calibration.
+            PassesValidation = auc.HasValue && brier < baselineBrier && logLoss < baselineLogLoss && correct > majorityCorrect
+        };
     }
 
     public MarketPrediction Predict(DailyFeatures todayFeatures, DailyMarketData todayMarket)
     {
-        var input = new ModelInput
-        {
-            BtcReturn1d = (float)todayFeatures.BtcReturn1d,
-            BtcReturn3d = (float)todayFeatures.BtcReturn3d,
-            BtcReturn7d = (float)todayFeatures.BtcReturn7d,
-            BtcReturn30d = (float)todayFeatures.BtcReturn30d,
-            BtcDrawdownFrom30dHigh = (float)todayFeatures.BtcDrawdownFrom30dHigh,
-            BtcDrawdownFromAth = (float)todayFeatures.BtcDrawdownFromAth,
-            RealizedVolatility7d = (float)todayFeatures.RealizedVolatility7d,
-            RealizedVolatility30d = (float)todayFeatures.RealizedVolatility30d,
-            VolumeVs30dAverage = (float)todayFeatures.VolumeVs30dAverage,
-            OiChange1d = (float)todayFeatures.OiChange1d,
-            OiChange7d = (float)todayFeatures.OiChange7d,
-            OiZScore30d = (float)todayFeatures.OiZScore30d,
-            FundingZScore30d = (float)todayFeatures.FundingZScore30d,
-            FundingZScore90d = (float)todayFeatures.FundingZScore90d,
-            DvolZScore30d = (float)todayFeatures.DvolZScore30d,
-            EtfFlow7d = (float)(todayFeatures.EtfFlow7d / 1_000_000m),
-            EtfFlowZScore30d = (float)todayFeatures.EtfFlowZScore30d,
-            FibRetracementRatio30d = (float)todayFeatures.FibRetracementRatio30d,
-            DistToGoldenPocket30d = (float)todayFeatures.DistToGoldenPocket30d,
-            KaufmanEfficiencyRatio10d = (float)todayFeatures.KaufmanEfficiencyRatio10d,
-            WeeklyTrendBias = (float)todayFeatures.WeeklyTrendBias,
-            DxyReturn7d = (float)todayFeatures.DxyReturn7d,
-            DxyZScore30d = (float)todayFeatures.DxyZScore30d,
-            Us10YYieldChange7d = (float)todayFeatures.Us10YYieldChange7d,
-            Sp500Return7d = (float)todayFeatures.Sp500Return7d,
-            DistToLowerLiquidityWall = (float)todayFeatures.DistToLowerLiquidityWall,
-            DistToUpperLiquidityWall = (float)todayFeatures.DistToUpperLiquidityWall,
-            IsLongLiquiditySwept = todayFeatures.IsLongLiquiditySwept ? 1f : 0f,
-            IsShortLiquiditySwept = todayFeatures.IsShortLiquiditySwept ? 1f : 0f,
-            FearGreedIndex = todayMarket.FearGreedIndex,
-            CoinbasePremium = (float)todayMarket.CoinbasePremium
-        };
-
-        float expertProb = CalculateHeuristicProbability(todayFeatures, todayMarket);
-        float fastTreeProb = expertProb;
-        float fastForestProb = expertProb;
-        float logisticProb = expertProb;
-
+        if (todayFeatures.Date != todayMarket.Date || todayMarket.BtcClose <= 0m || todayMarket.Date >= DateOnly.FromDateTime(DateTime.UtcNow))
+            throw new ArgumentException("Features and a positive closing price must refer to the same closed UTC day.");
+        decimal probability = 0.5m;
+        ModelTrainingMetrics? metrics;
+        bool trained;
         lock (_lock)
         {
-            if (_fastTreeEngine != null)
+            metrics = _metrics;
+            if (metrics != null && metrics.DataThroughDate > todayMarket.Date)
+                throw new InvalidOperationException("This model has seen outcomes after the requested prediction date. Use walk-forward evaluation.");
+            trained = _engine != null;
+            if (_engine != null)
             {
-                var outFt = _fastTreeEngine.Predict(input);
-                float p = outFt.Probability;
-                if (float.IsNaN(p) || p <= 0f || p >= 1f)
-                    p = 1.0f / (1.0f + MathF.Exp(-outFt.Score));
-                if (!float.IsNaN(p) && !float.IsInfinity(p))
-                    fastTreeProb = Math.Clamp(p, 0.02f, 0.98f);
-            }
-            if (_fastForestEngine != null)
-            {
-                var outFf = _fastForestEngine.Predict(input);
-                float p = outFf.Probability;
-                if (float.IsNaN(p) || p <= 0f || p >= 1f)
-                    p = 1.0f / (1.0f + MathF.Exp(-outFf.Score));
-                if (!float.IsNaN(p) && !float.IsInfinity(p))
-                    fastForestProb = Math.Clamp(p, 0.02f, 0.98f);
-            }
-            if (_logisticEngine != null)
-            {
-                var outLog = _logisticEngine.Predict(input);
-                float p = outLog.Probability;
-                if (float.IsNaN(p) || p <= 0f || p >= 1f)
-                    p = 1.0f / (1.0f + MathF.Exp(-outLog.Score));
-                if (!float.IsNaN(p) && !float.IsInfinity(p))
-                    logisticProb = Math.Clamp(p, 0.02f, 0.98f);
+                float p = _engine.Predict(Input(todayFeatures)).Probability;
+                if (!float.IsFinite(p) || p < 0f || p > 1f)
+                    throw new InvalidOperationException("The directional model produced an invalid probability.");
+                probability = (decimal)p;
             }
         }
-
-        // Multi-Model Ensemble Weight Calculation
-        double aucFt = LastTrainingMetrics?.FastTreeAuc > 0.5 ? LastTrainingMetrics.FastTreeAuc : 0.72;
-        double aucFf = LastTrainingMetrics?.FastForestAuc > 0.5 ? LastTrainingMetrics.FastForestAuc : 0.70;
-        double aucLog = LastTrainingMetrics?.LogisticAuc > 0.5 ? LastTrainingMetrics.LogisticAuc : 0.65;
-        double aucExp = 0.68;
-
-        // Base weights proportional to excess AUC over 0.45
-        decimal wFt = (decimal)Math.Max(0.10, aucFt - 0.45);
-        decimal wFf = (decimal)Math.Max(0.10, aucFf - 0.45);
-        decimal wLog = (decimal)Math.Max(0.10, aucLog - 0.45);
-        decimal wExp = (decimal)Math.Max(0.10, aucExp - 0.45);
-
-        // Regime-aware modulation
-        if (todayFeatures.KaufmanEfficiencyRatio10d > 0.55m)
-        {
-            wLog *= 1.30m; // Linear trend follower
-            wFt *= 1.15m;
-        }
-        else if (todayFeatures.KaufmanEfficiencyRatio10d < 0.25m)
-        {
-            wFf *= 1.30m;  // Random forest bagging resists chop
-            wExp *= 1.35m; // Golden pocket & liquidity sweep expert excels in chop
-            wLog *= 0.70m;
-        }
-
-        if (todayFeatures.IsLongLiquiditySwept || todayFeatures.IsShortLiquiditySwept)
-        {
-            wExp *= 1.30m;
-            wFt *= 1.15m;
-        }
-
-        decimal totalWeight = wFt + wFf + wLog + wExp;
-        if (totalWeight <= 0m) totalWeight = 1m;
-
-        decimal normFt = Math.Round(wFt / totalWeight, 4);
-        decimal normFf = Math.Round(wFf / totalWeight, 4);
-        decimal normLog = Math.Round(wLog / totalWeight, 4);
-        decimal normExp = Math.Round(1m - (normFt + normFf + normLog), 4);
-
-        decimal pFt = Math.Round((decimal)fastTreeProb, 4);
-        decimal pFf = Math.Round((decimal)fastForestProb, 4);
-        decimal pLog = Math.Round((decimal)logisticProb, 4);
-        decimal pExp = Math.Round((decimal)expertProb, 4);
-
-        decimal ensembleProb = Math.Clamp(
-            normFt * pFt + normFf * pFf + normLog * pLog + normExp * pExp,
-            0.02m,
-            0.98m);
-
-        float probability = (float)ensembleProb;
-
-        static string GetVoteSignal(decimal p) =>
-            p >= 0.58m ? "BULLISH" :
-            p <= 0.42m ? "BEARISH" : "NEUTRAL";
-
-        var votes = new List<EnsembleModelVote>
-        {
-            new() { ModelName = "FastTree (GBDT)", ModelFamily = "Gradient Boosted Trees", Probability = pFt, Weight = normFt, Signal = GetVoteSignal(pFt) },
-            new() { ModelName = "FastForest (RF)", ModelFamily = "Bagged Random Forest", Probability = pFf, Weight = normFf, Signal = GetVoteSignal(pFf) },
-            new() { ModelName = "SDCA Logistic Reg", ModelFamily = "Regularized Linear GLM", Probability = pLog, Weight = normLog, Signal = GetVoteSignal(pLog) },
-            new() { ModelName = "Quant Rules Expert", ModelFamily = "Structural Market Heuristics", Probability = pExp, Weight = normExp, Signal = GetVoteSignal(pExp) }
-        };
-
-        decimal meanDev = (Math.Abs(pFt - ensembleProb) + Math.Abs(pFf - ensembleProb) + Math.Abs(pLog - ensembleProb) + Math.Abs(pExp - ensembleProb)) / 4m;
-        decimal agreementPct = Math.Clamp(Math.Round((1.0m - 2.0m * meanDev) * 100m, 1), 0m, 100m);
-
-        int bullVotes = votes.Count(v => v.Signal == "BULLISH");
-        int bearVotes = votes.Count(v => v.Signal == "BEARISH");
-
-        string consensusVerdict;
-        if (bullVotes == 4 || bearVotes == 4)
-            consensusVerdict = "Unanimous Consensus";
-        else if (bullVotes >= 3 || bearVotes >= 3 || agreementPct >= 80m)
-            consensusVerdict = "Strong Consensus";
-        else if (agreementPct >= 60m)
-            consensusVerdict = "Moderate Consensus";
-        else
-            consensusVerdict = "Divided / Split Council";
-
-        var ensembleDetails = new EnsembleConsensusDetails
-        {
-            FastTreeProb = pFt,
-            FastForestProb = pFf,
-            LogisticProb = pLog,
-            ExpertProb = pExp,
-            FastTreeWeight = normFt,
-            FastForestWeight = normFf,
-            LogisticWeight = normLog,
-            ExpertWeight = normExp,
-            ConsensusAgreementPercent = agreementPct,
-            ConsensusVerdict = consensusVerdict,
-            Votes = votes
-        };
-
-        // Interpret signals
-        var drivers = new List<string>();
-
-        // Liquidity Sweep & Liquidation Walls Interpretations (Stop hunt / SFP)
-        if (todayFeatures.IsLongLiquiditySwept)
-            drivers.Add("Long Liquidity Sweep detected: Price penetrated below key swing support, wiped out 25x/50x stop-losses, and aggressively reclaimed the range (Bullish Spring).");
-        else if (todayFeatures.IsShortLiquiditySwept)
-            drivers.Add("Short Liquidity Sweep detected: Price spiked above swing resistance to trigger buy-stops, but immediately rejected back into the range (Bearish Upthrust).");
-
-        if (todayFeatures.DistToUpperLiquidityWall > 0m && todayFeatures.DistToUpperLiquidityWall <= 2.2m)
-            drivers.Add($"Price is within {todayFeatures.DistToUpperLiquidityWall:F1}% of the nearest Short Liquidation Wall, acting as an overhead liquidity magnet.");
-        else if (todayFeatures.DistToLowerLiquidityWall > 0m && todayFeatures.DistToLowerLiquidityWall <= 2.2m)
-            drivers.Add($"Price is within {todayFeatures.DistToLowerLiquidityWall:F1}% of the nearest Long Liquidation Wall, warning of local downside stop-run risk.");
-
-        if (todayFeatures.IsInGoldenPocket30d)
-            drivers.Add($"Price is testing the key 0.618 - 0.650 Fibonacci Golden Pocket (Retracement: {todayFeatures.FibRetracementRatio30d:P1}), a high-probability reversal zone.");
-        else if (todayFeatures.FibRetracementRatio30d >= 0.786m)
-            drivers.Add($"Price has retraced past the 0.786 Fibonacci support ({todayFeatures.FibRetracementRatio30d:P1}), indicating deep corrective pressure.");
-
-        if (todayFeatures.KaufmanEfficiencyRatio10d < 0.25m)
-            drivers.Add($"Price action reflects low directional efficiency (KER: {todayFeatures.KaufmanEfficiencyRatio10d:F2}), characteristic of an Elliott Wave corrective structure (Wave 4 / ABC chop).");
-        else if (todayFeatures.KaufmanEfficiencyRatio10d > 0.60m)
-            drivers.Add($"Price action reflects strong directional momentum (KER: {todayFeatures.KaufmanEfficiencyRatio10d:F2}), indicating Elliott Wave impulse dynamics (Wave 3/5).");
-
-        // Global Macro Interpretations
-        if (todayFeatures.DxyZScore30d < -1.0m || todayFeatures.DxyReturn7d < -0.015m)
-            drivers.Add($"US Dollar Index (DXY) is weakening (Z-Score: {todayFeatures.DxyZScore30d:F2}, 7d: {todayFeatures.DxyReturn7d:P1}), providing a global liquidity tailwind for Bitcoin.");
-        else if (todayFeatures.DxyZScore30d > 1.2m || todayFeatures.DxyReturn7d > 0.015m)
-            drivers.Add($"US Dollar Index (DXY) is surging (Z-Score: {todayFeatures.DxyZScore30d:F2}, 7d: +{todayFeatures.DxyReturn7d:P1}), creating macro dollar liquidity headwinds.");
-
-        if (todayFeatures.Us10YYieldChange7d < -0.15m)
-            drivers.Add($"US 10-Year Treasury Yields eased by {todayFeatures.Us10YYieldChange7d:F2}% over 7 days, reducing benchmark discount rate pressure.");
-        else if (todayFeatures.Us10YYieldChange7d > 0.20m)
-            drivers.Add($"US 10-Year Treasury Yields spiked by +{todayFeatures.Us10YYieldChange7d:F2}% over 7 days, tightening debt and liquidity conditions.");
-
-        if (todayFeatures.Sp500Return7d > 0.02m)
-            drivers.Add($"S&P 500 equity momentum is expanding (+{todayFeatures.Sp500Return7d:P1} over 7d), confirming institutional Risk-On sentiment.");
-        else if (todayFeatures.Sp500Return7d < -0.025m)
-            drivers.Add($"S&P 500 benchmark equities are under pressure ({todayFeatures.Sp500Return7d:P1} over 7d), signaling macro Risk-Off drag.");
-
-        if (todayFeatures.FundingZScore30d < -1.0m)
-            drivers.Add($"Funding Rate is deeply negative (Z-Score: {todayFeatures.FundingZScore30d:F2}) indicating short-side crowding and potential squeeze.");
-        else if (todayFeatures.FundingZScore30d > 1.5m)
-            drivers.Add($"Funding Rate is elevated (Z-Score: {todayFeatures.FundingZScore30d:F2}) indicating greedy leverage.");
-
-        if (todayFeatures.OiZScore30d < -1.0m)
-            drivers.Add($"Futures Open Interest has flushed (Z-Score: {todayFeatures.OiZScore30d:F2}), reducing liquidation cascade risk.");
-
-        if (todayFeatures.DvolZScore30d < -1.0m)
-            drivers.Add($"Implied Volatility (DVOL) is compressed (Z-Score: {todayFeatures.DvolZScore30d:F2}), typically preceding a major expansion.");
-
-        if (todayFeatures.EtfFlowZScore30d > 1.2m)
-            drivers.Add($"Institutional ETF Inflows are exceptionally high (Z-Score: {todayFeatures.EtfFlowZScore30d:F2}), providing strong Wall Street spot support.");
-        else if (todayFeatures.EtfFlowZScore30d < -1.2m)
-            drivers.Add($"Institutional ETF Outflows are elevated (Z-Score: {todayFeatures.EtfFlowZScore30d:F2}), indicating institutional de-risking.");
-
-        if (todayFeatures.EtfFlow7d > 300_000_000m)
-            drivers.Add($"Net 7-day Spot ETF inflows reached +${todayFeatures.EtfFlow7d / 1_000_000m:F1}M, providing persistent spot liquidity.");
-        else if (todayFeatures.EtfFlow7d < -300_000_000m)
-            drivers.Add($"Net 7-day Spot ETF outflows reached -${Math.Abs(todayFeatures.EtfFlow7d / 1_000_000m):F1}M, adding supply overhang.");
-
-        if (todayFeatures.WeeklyTrendBias > 0.08m)
-            drivers.Add($"BTC remains comfortably above its 50-day macro trend average (+{todayFeatures.WeeklyTrendBias:P1}), preserving broader bullish structure.");
-        else if (todayFeatures.WeeklyTrendBias < -0.08m)
-            drivers.Add($"BTC is trading below its 50-day macro trend average ({todayFeatures.WeeklyTrendBias:P1}), facing macro trend resistance.");
-
-        if (todayFeatures.BtcDrawdownFrom30dHigh < -0.08m)
-            drivers.Add($"BTC has experienced significant 30-day drawdown ({todayFeatures.BtcDrawdownFrom30dHigh:P1}).");
-
-        if (todayMarket.FearGreedIndex < 30)
-            drivers.Add($"Market sentiment is in Extreme Fear ({todayMarket.FearGreedIndex}), historically an accumulation signal.");
-
-        if (consensusVerdict == "Unanimous Consensus")
-            drivers.Add($"Multi-Model Ensemble reached Unanimous Consensus ({agreementPct:F0}% Agreement): All 4 models align on directional momentum.");
-        else if (consensusVerdict == "Strong Consensus")
-            drivers.Add($"Multi-Model Ensemble reached Strong Consensus ({agreementPct:F0}% Agreement): 3+ independent models confirm the signal.");
-
-        if (drivers.Count == 0)
-            drivers.Add("Indicators are near baseline neutral conditions.");
-
-        // --- 4 CARDINAL QUANT ALPHA ENGINE GATES ---
-        // 1. Extreme Greed Euphoria Climax: Invert top FOMO into Reversal Short
-        bool isEuphoriaClimax = todayMarket.FearGreedIndex >= 70 && 
-            (todayFeatures.BtcReturn7d > 0.08m || todayFeatures.IsShortLiquiditySwept || todayFeatures.FundingZScore30d > 1.6m) &&
-            todayFeatures.KaufmanEfficiencyRatio10d < 0.70m;
-
-        // 2. Extreme Fear Capitulation: Invert panic dumping into Reversal Long
-        bool isCapitulationSpring = todayMarket.FearGreedIndex <= 25 && 
-            (todayFeatures.IsLongLiquiditySwept || todayFeatures.FundingZScore30d <= -1.4m) &&
-            todayFeatures.KaufmanEfficiencyRatio10d < 0.50m;
-
-        // 3. Falling Knife: Strong bearish impulse without reversal confirmation
-        bool isFallingKnife = todayFeatures.BtcReturn7d < -0.06m && todayFeatures.KaufmanEfficiencyRatio10d > 0.50m && !todayFeatures.IsLongLiquiditySwept;
-
-        // 4. Low Efficiency Chop: Sideways noise with low net displacement
-        bool isChop = todayFeatures.KaufmanEfficiencyRatio10d < 0.28m && !todayFeatures.IsLongLiquiditySwept && !todayFeatures.IsShortLiquiditySwept;
-
-        if (isFallingKnife)
-        {
-            probability = 0.50f;
-            ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 100m };
-            drivers.Insert(0, $"Falling Knife Gate: Severe downward impulse (KER: {todayFeatures.KaufmanEfficiencyRatio10d:F2}, 7d: {todayFeatures.BtcReturn7d:P1}) without Wyckoff Spring confirmation. Quant Engine mandates Cash Hold.");
-        }
-        else if (isEuphoriaClimax)
-        {
-            probability = 0.22f; // Reversal short (78% conviction Bearish)
-            ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 75m };
-            drivers.Insert(0, $"Euphoria Climax Reversal Gate: Extreme Greed (F&G: {todayMarket.FearGreedIndex}) / momentum extension (+{todayFeatures.BtcReturn7d:P1} 7d) warns of local distribution top. Model inverts FOMO continuation into tactical distribution short.");
-        }
-        else if (isCapitulationSpring)
-        {
-            probability = 0.78f; // Reversal long (78% conviction Bullish)
-            ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 75m };
-            drivers.Insert(0, $"Capitulation Bottom Reversal Gate: Extreme Fear (F&G: {todayMarket.FearGreedIndex}) / negative funding (Z: {todayFeatures.FundingZScore30d:F2}) indicates peak short crowding. Model inverts panic into high-expectancy accumulation bounce.");
-        }
-        else if (isChop)
-        {
-            probability = 0.50f;
-            ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 100m };
-            drivers.Insert(0, $"Consolidation Chop Gate: Kaufman Efficiency Ratio ({todayFeatures.KaufmanEfficiencyRatio10d:F2}) confirms choppy sideways range. Model mandates Neutral Cash Hold to eliminate whipsaw stop-outs.");
-        }
-        else if (probability >= 0.65f)
-        {
-            if (todayMarket.FearGreedIndex >= 68 || todayFeatures.FundingZScore30d > 1.6m)
-            {
-                probability = 0.50f;
-                ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 80m };
-                drivers.Insert(0, $"Cardinal Rule of Greed: Bullish continuation suppressed due to elevated sentiment (F&G: {todayMarket.FearGreedIndex}) or crowded leverage funding (Z: {todayFeatures.FundingZScore30d:F2}).");
-            }
-            else
-            {
-                // Synchronize consensus verdict with Bullish direction
-                if (bullVotes == 4)
-                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Unanimous Consensus", ConsensusAgreementPercent = 100m };
-                else if (bullVotes >= 3)
-                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 75m };
-                else
-                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Moderate Consensus", ConsensusAgreementPercent = 50m };
-            }
-        }
-        else if (probability <= 0.35f)
-        {
-            if (todayMarket.FearGreedIndex <= 32 || todayFeatures.FundingZScore30d < -0.8m)
-            {
-                probability = 0.50f;
-                ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 80m };
-                drivers.Insert(0, $"Cardinal Rule of Fear: Bearish shorting suppressed due to terrified sentiment (F&G: {todayMarket.FearGreedIndex}) or negative funding squeeze risk (Z: {todayFeatures.FundingZScore30d:F2}).");
-            }
-            else
-            {
-                // Synchronize consensus verdict with Bearish direction
-                if (bearVotes == 4)
-                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Unanimous Consensus", ConsensusAgreementPercent = 100m };
-                else if (bearVotes >= 3)
-                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 75m };
-                else
-                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Moderate Consensus", ConsensusAgreementPercent = 50m };
-            }
-        }
-
-        string signal;
-        string regime;
-        string confidence;
-
-        if (probability >= 0.65f)
-        {
-            signal = "BULLISH_OPPORTUNITY";
-            regime = isCapitulationSpring ? "Capitulation Spring / Accumulation" : "HighProbabilityBottom / Accumulation";
-            confidence = probability >= 0.75f ? "High" : "Moderate";
-        }
-        else if (probability <= 0.35f)
-        {
-            signal = "BEARISH_RISK";
-            regime = isEuphoriaClimax ? "Euphoria Climax / Distribution" : "Overextended / Distribution";
-            confidence = probability <= 0.25f ? "High" : "Moderate";
-        }
-        else
-        {
-            signal = "NEUTRAL_HOLD";
-            regime = isChop ? "Consolidation / Chop" : (isFallingKnife ? "Falling Knife / Capital Preservation" : "Neutral / Wait");
-            confidence = "Neutral";
-        }
-
-        var (targetPrice, invalidationPrice, targetPct, invalidationPct, rrRatio, cone) =
-            CalculateProjectionAndTargets(
-                todayMarket.BtcClose,
-                todayFeatures.Date,
-                signal,
-                Math.Round((decimal)probability, 4),
-                todayMarket.BtcDvol,
-                todayFeatures.RealizedVolatility30d,
-                todayFeatures.DistToUpperLiquidityWall,
-                todayFeatures.DistToLowerLiquidityWall);
-
+        string status = todayFeatures.ConsecutivePriceDays < PredictionPolicy.WarmupDays ? "DATA_UNAVAILABLE"
+            : !trained ? "INSUFFICIENT_DATA" : metrics?.PassesValidation == true ? "MODEL_ESTIMATE" : "VALIDATION_FAILED";
+        bool allowed = status == "MODEL_ESTIMATE";
+        string signal = allowed && probability >= PredictionPolicy.EntryThreshold ? "BULLISH_OPPORTUNITY"
+            : allowed && probability <= 1m - PredictionPolicy.EntryThreshold ? "BEARISH_RISK" : "NEUTRAL_HOLD";
+        var (target, stop, targetPct, stopPct, rr, cone) = CalculateProjectionAndTargets(
+            todayMarket.BtcClose, todayMarket.Date, signal, probability, todayMarket.BtcDvol,
+            todayFeatures.RealizedVolatility30d, 0m, 0m);
         return new MarketPrediction
         {
-            Date = todayFeatures.Date,
-            BtcClose = todayMarket.BtcClose,
-            Signal = signal,
-            BullishProbability = Math.Round((decimal)probability, 4),
-            MarketRegime = regime,
-            Confidence = confidence,
-            KeyDrivers = drivers,
-            TargetPrice = targetPrice,
-            InvalidationPrice = invalidationPrice,
-            TargetChangePercent = targetPct,
-            InvalidationChangePercent = invalidationPct,
-            RiskRewardRatio = rrRatio,
-            HorizonDays = 7,
-            ProjectionCone = cone,
-            Ensemble = ensembleDetails
+            Date = todayMarket.Date, BtcClose = todayMarket.BtcClose, ModelVersion = PredictionPolicy.Version,
+            GeneratedAtUtc = DateTime.UtcNow, PredictionStatus = status, ProbabilityIsCalibrated = false,
+            BullishProbability = Math.Round(probability, 6), Signal = signal,
+            MarketRegime = status == "DATA_UNAVAILABLE" ? "Incomplete recent daily price history"
+                : status == "INSUFFICIENT_DATA" ? "Insufficient training history" : status == "VALIDATION_FAILED"
+                ? "No demonstrated validation advantage" : "7-day direction estimate",
+            Confidence = "Uncalibrated", Validation = metrics, Ensemble = null,
+            KeyDrivers =
+            [
+                PredictionPolicy.ProbabilityMeaning,
+                "Regularized logistic baseline using 10 price/volume features; external feeds and rule overrides are excluded.",
+                status == "DATA_UNAVAILABLE" ? "Recent price observations are incomplete; no trade is issued."
+                    : !trained ? "No trained model: no trade is issued." : metrics?.PassesValidation != true
+                    ? "The chronological holdout did not beat the training-base-rate benchmark; no trade is issued."
+                    : "The candidate beat its baseline on a chronological holdout. This is not evidence of calibrated probabilities or future profitability.",
+                "Targets are a separate risk policy (reward/risk 1.5); volatility bands illustrate uncertainty and do not forecast a price path."
+            ],
+            FeatureSnapshotJson = JsonSerializer.Serialize(todayFeatures),
+            TargetPrice = target, InvalidationPrice = stop, TargetChangePercent = targetPct,
+            InvalidationChangePercent = stopPct, RiskRewardRatio = rr,
+            HorizonDays = PredictionPolicy.HorizonDays, ProjectionCone = cone
         };
     }
 
-    public static (decimal targetPrice, decimal invalidationPrice, decimal targetPct, decimal invalidationPct, decimal rrRatio, IReadOnlyList<PredictionConePoint> cone) CalculateProjectionAndTargets(
-        decimal btcClose,
-        DateOnly todayDate,
-        string signal,
-        decimal bullishProbability,
-        decimal? btcDvol,
-        decimal realizedVol30d,
-        decimal distToUpperLiqWall,
-        decimal distToLowerLiqWall)
+    public static (decimal targetPrice, decimal invalidationPrice, decimal targetPct, decimal invalidationPct,
+        decimal rrRatio, IReadOnlyList<PredictionConePoint> cone) CalculateProjectionAndTargets(
+        decimal btcClose, DateOnly todayDate, string signal, decimal bullishProbability,
+        decimal? btcDvol, decimal realizedVol30d, decimal distToUpperLiqWall, decimal distToLowerLiqWall)
     {
-        // 1. Determine annualized volatility
-        decimal volAnnual;
-        if (btcDvol.HasValue && btcDvol.Value > 10m)
+        if (btcClose <= 0m) throw new ArgumentOutOfRangeException(nameof(btcClose));
+        // RealizedVolatility30d is already annualized. Prefer the model's reproducible price series
+        // over an optional external feed whose historical availability is not versioned.
+        decimal annualVol = realizedVol30d > 0m ? realizedVol30d : btcDvol is > 0m ? btcDvol.Value / 100m : 0.5m;
+        annualVol = Math.Clamp(annualVol, 0.01m, 3m);
+        decimal dailyVol = annualVol / (decimal)Math.Sqrt(365d);
+        decimal stopPct = Math.Clamp(dailyVol * (decimal)Math.Sqrt(7d) * 0.65m, 0.02m, 0.06m);
+        decimal targetPct = stopPct * 1.5m;
+        bool bearish = signal == "BEARISH_RISK", neutral = signal == "NEUTRAL_HOLD";
+        decimal signedTarget = bearish ? -targetPct : targetPct, signedStop = bearish ? stopPct : -stopPct;
+        var cone = Enumerable.Range(0, 8).Select(t =>
         {
-            volAnnual = btcDvol.Value / 100m;
-        }
-        else if (realizedVol30d > 0.005m)
-        {
-            volAnnual = realizedVol30d * (decimal)Math.Sqrt(365);
-        }
-        else
-        {
-            volAnnual = 0.50m;
-        }
-
-        // Daily standard deviation & 7-day expected volatility
-        decimal volDaily = volAnnual / (decimal)Math.Sqrt(365);
-        decimal sigma7d = volDaily * (decimal)Math.Sqrt(7);
-
-        // 2. Determine volatility-adaptive target & invalidation percentages
-        // TP1 Concept: Target reflects First Resistance / Support Level Test (3.2% - 4.8% or nearest Liquidity Wall)
-        decimal dynamicSl = Math.Clamp(sigma7d * 0.65m, 0.045m, 0.060m);
-        decimal targetPct;
-        decimal invalidationPct;
-        decimal driftDaily;
-
-        if (signal == "BULLISH_OPPORTUNITY")
-        {
-            if (distToLowerLiqWall >= 2.5m && distToLowerLiqWall <= 5.5m)
-                dynamicSl = Math.Max(dynamicSl, (distToLowerLiqWall + 0.5m) / 100m);
-
-            invalidationPct = dynamicSl;
-
-            // TP1: Test of nearest overhead resistance / Upper Liquidity Wall
-            decimal levelTestTp = Math.Clamp(sigma7d * 0.50m, 0.034m, 0.048m);
-            if (distToUpperLiqWall >= 2.5m && distToUpperLiqWall <= 6.0m)
-                levelTestTp = distToUpperLiqWall / 100m;
-
-            targetPct = levelTestTp;
-            driftDaily = targetPct / 7m;
-        }
-        else if (signal == "BEARISH_RISK")
-        {
-            if (distToUpperLiqWall >= 2.5m && distToUpperLiqWall <= 5.5m)
-                dynamicSl = Math.Max(dynamicSl, (distToUpperLiqWall + 0.5m) / 100m);
-
-            invalidationPct = dynamicSl;
-
-            // TP1: Test of nearest downside support / Lower Liquidity Wall
-            decimal levelTestTp = Math.Clamp(sigma7d * 0.50m, 0.034m, 0.048m);
-            if (distToLowerLiqWall >= 2.5m && distToLowerLiqWall <= 6.0m)
-                levelTestTp = distToLowerLiqWall / 100m;
-
-            targetPct = levelTestTp;
-            driftDaily = -targetPct / 7m;
-        }
-        else
-        {
-            targetPct = 0.035m;
-            invalidationPct = 0.045m;
-            driftDaily = (bullishProbability - 0.50m) * 0.04m / 7m;
-        }
-
-        decimal targetPrice;
-        decimal invalidationPrice;
-        decimal signedTargetPct;
-        decimal signedInvalidationPct;
-
-        if (signal == "BEARISH_RISK")
-        {
-            targetPrice = Math.Round(btcClose * (1m - targetPct), 2);
-            invalidationPrice = Math.Round(btcClose * (1m + invalidationPct), 2);
-            signedTargetPct = -targetPct;
-            signedInvalidationPct = invalidationPct;
-        }
-        else
-        {
-            targetPrice = Math.Round(btcClose * (1m + targetPct), 2);
-            invalidationPrice = Math.Round(btcClose * (1m - invalidationPct), 2);
-            signedTargetPct = targetPct;
-            signedInvalidationPct = -invalidationPct;
-        }
-
-        decimal rrRatio = invalidationPct > 0m ? Math.Round(targetPct / invalidationPct, 2) : 2.0m;
-
-        // 3. Generate 7-day prediction cone points (Day 0 to Day 7)
-        var cone = new List<PredictionConePoint>();
-        for (int t = 0; t <= 7; t++)
-        {
-            var date = todayDate.AddDays(t);
-            decimal expected = btcClose * (1m + driftDaily * t);
-            decimal sigmaT = volDaily * (decimal)Math.Sqrt(t);
-            decimal upper = expected * (1m + sigmaT);
-            decimal lower = expected * (1m - sigmaT);
-
-            cone.Add(new PredictionConePoint
+            double sigma = (double)dailyVol * Math.Sqrt(t);
+            return new PredictionConePoint
             {
-                Time = date.ToString("yyyy-MM-dd"),
-                ExpectedPrice = Math.Round(expected, 2),
-                UpperBand = Math.Round(upper, 2),
-                LowerBand = Math.Round(lower, 2)
-            });
-        }
-
-        return (targetPrice, invalidationPrice, signedTargetPct, signedInvalidationPct, rrRatio, cone);
+                Time = todayDate.AddDays(t).ToString("yyyy-MM-dd"), ExpectedPrice = btcClose,
+                UpperBand = Math.Round(btcClose * (decimal)Math.Exp(sigma), 2),
+                LowerBand = Math.Round(btcClose * (decimal)Math.Exp(-sigma), 2)
+            };
+        }).ToList();
+        return neutral ? (0m, 0m, 0m, 0m, 0m, cone)
+            : (Math.Round(btcClose * (1m + signedTarget), 2), Math.Round(btcClose * (1m + signedStop), 2),
+                signedTarget, signedStop, 1.5m, cone);
     }
 
-    private static float CalculateHeuristicProbability(DailyFeatures feat, DailyMarketData market)
-    {
-        float score = 0.50f;
-
-        // Fibonacci Golden Pocket (0.618 - 0.650 retracement)
-        if (feat.IsInGoldenPocket30d) score += 0.08f;
-        else if (feat.FibRetracementRatio30d > 0.85m) score -= 0.08f;
-
-        // Wave momentum & trend bias
-        if (feat.WeeklyTrendBias > 0.05m && feat.KaufmanEfficiencyRatio10d < 0.30m) score += 0.05f; // Bullish pullback in macro uptrend
-        else if (feat.WeeklyTrendBias < -0.08m) score -= 0.06f; // Strong macro downtrend resistance
-
-        // Negative funding increases bounce probability
-        if (feat.FundingZScore30d < -1.5m) score += 0.15f;
-        else if (feat.FundingZScore30d < -0.8m) score += 0.08f;
-        else if (feat.FundingZScore30d > 1.5m) score -= 0.12f;
-
-        // Flushed OI increases stability
-        if (feat.OiZScore30d < -1.0m) score += 0.10f;
-        else if (feat.OiZScore30d > 1.5m) score -= 0.10f;
-
-        // Low DVOL before expansion
-        if (feat.DvolZScore30d < -1.0m) score += 0.05f;
-
-        // Institutional ETF flows
-        if (feat.EtfFlowZScore30d > 1.2m) score += 0.08f;
-        else if (feat.EtfFlowZScore30d < -1.2m) score -= 0.08f;
-
-        if (feat.EtfFlow7d > 300_000_000m) score += 0.05f;
-        else if (feat.EtfFlow7d < -300_000_000m) score -= 0.05f;
-
-        // Extreme fear & capitulation spring vs Extreme greed & euphoria climax
-        if (market.FearGreedIndex <= 20) score += 0.20f;
-        else if (market.FearGreedIndex <= 28) score += 0.12f;
-        else if (market.FearGreedIndex >= 78) score -= 0.20f;
-        else if (market.FearGreedIndex >= 70) score -= 0.12f;
-
-        if (feat.BtcReturn7d > 0.12m) score -= 0.14f;
-        else if (feat.BtcReturn7d < -0.12m) score += 0.14f;
-
-        // Global Macro Dynamics (Liquidity, Currency, & Equities)
-        if (feat.DxyZScore30d < -1.0m) score += 0.06f;
-        else if (feat.DxyZScore30d > 1.2m) score -= 0.07f;
-
-        if (feat.Sp500Return7d > 0.02m) score += 0.05f;
-        else if (feat.Sp500Return7d < -0.025m) score -= 0.06f;
-
-        if (feat.Us10YYieldChange7d < -0.15m) score += 0.04f;
-        else if (feat.Us10YYieldChange7d > 0.20m) score -= 0.04f;
-
-        // Liquidity Sweep & Liquidation Wall Dynamics
-        if (feat.IsLongLiquiditySwept) score += 0.10f; // Spring / flush of longs leads to powerful bounce
-        if (feat.IsShortLiquiditySwept) score -= 0.10f; // Upthrust / bull-trap rejection
-        if (feat.DistToUpperLiquidityWall > 0m && feat.DistToUpperLiquidityWall < 1.5m) score += 0.04f; // magnet pull up
-        if (feat.DistToLowerLiquidityWall > 0m && feat.DistToLowerLiquidityWall < 1.5m) score -= 0.04f; // magnet pull down
-
-        return Math.Clamp(score, 0.05f, 0.95f);
-    }
-
-    private static (int MarketDataCount, DateOnly LastDate, PredictionJournalResponse Result)? _cachedHistoricalJournal;
-    private static readonly object _cacheLock = new();
-
-    public PredictionJournalResponse GenerateWalkForwardJournal(
-        IReadOnlyList<DailyMarketData> marketData,
-        IReadOnlyList<DailyFeatures> features,
+    public IReadOnlyList<MarketPrediction> GenerateWalkForwardPredictions(
+        IReadOnlyList<DailyMarketData> marketData, IReadOnlyList<DailyFeatures> features,
         ITurningPointDetector turningPointDetector)
     {
-        if (marketData == null || marketData.Count == 0 || features == null || features.Count == 0)
+        var todayUtc = DateOnly.FromDateTime(DateTime.UtcNow);
+        var sorted = marketData.Where(d => d.Date < todayUtc).OrderBy(d => d.Date).ToList();
+        var featureMap = features.ToDictionary(f => f.Date);
+        string fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            PredictionPolicy.Version + JsonSerializer.Serialize(sorted) + JsonSerializer.Serialize(features))));
+        lock (CacheLock)
+            if (_cachedWalkForward is { } cached && cached.Fingerprint == fingerprint)
+                return cached.Predictions;
+        var predictions = new List<MarketPrediction>();
+        for (int i = PredictionPolicy.WarmupDays - 1; i < sorted.Count; i++)
         {
-            return new PredictionJournalResponse
-            {
-                Mode = "historical",
-                Stats = new LiveJournalStats(),
-                Items = Array.Empty<PredictionJournalItem>()
-            };
+            var day = sorted[i];
+            if (!featureMap.TryGetValue(day.Date, out var feature)) continue;
+            var available = sorted.Take(i + 1).ToList();
+            var historicalFeatures = features.Where(f => f.Date <= day.Date).ToList();
+            var dataset = turningPointDetector.BuildTrainingDataset(available, historicalFeatures);
+            using var predictor = new PredictorService();
+            if (CanTrain(dataset)) predictor.TrainModel(dataset);
+            predictions.Add(predictor.Predict(feature, day));
         }
+        var result = predictions.AsReadOnly();
+        lock (CacheLock) _cachedWalkForward = (fingerprint, result);
+        return result;
+    }
 
-        var sortedMarket = marketData.OrderBy(d => d.Date).ToList();
-        var sortedFeatures = features.OrderBy(f => f.Date).ToList();
-        var featuresByDate = sortedFeatures.ToDictionary(f => f.Date);
-        var lastMarketDate = sortedMarket[^1].Date;
+    public static bool CanTrain(IReadOnlyList<ModelTrainingSample> dataset)
+    {
+        if (dataset.Count < PredictionPolicy.MinimumDatasetSamples) return false;
+        var sorted = dataset.OrderBy(s => s.Date).ToList();
+        int split = (int)(sorted.Count * 0.8);
+        var fit = sorted.Take(split).Where(s => s.OutcomeDate < sorted[split].Date).ToList();
+        return fit.Count >= PredictionPolicy.MinimumFitSamples && fit.Select(s => s.ForwardReturn > 0m).Distinct().Count() == 2;
+    }
 
-        lock (_cacheLock)
+    public static IPredictorService PrepareForLatest(IPredictorService predictor,
+        IReadOnlyList<DailyMarketData> data, IReadOnlyList<DailyFeatures> features, ITurningPointDetector detector)
+    {
+        var dataset = detector.BuildTrainingDataset(data, features);
+        if (!CanTrain(dataset)) return new PredictorService();
+        var throughDate = dataset.Max(s => s.OutcomeDate);
+        if (predictor.LastTrainingMetrics?.DataThroughDate != throughDate ||
+            predictor.LastTrainingMetrics.TrainingDataFingerprint != TrainingFingerprint(dataset.OrderBy(s => s.Date).ToList()))
+            predictor.TrainModel(dataset);
+        return predictor;
+    }
+
+    private static string TrainingFingerprint(IReadOnlyList<ModelTrainingSample> samples) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(
+            samples.Select(s => new { s.Date, s.OutcomeDate, s.ForwardReturn, Input = Input(s.Features) })))));
+
+    public void Dispose()
+    {
+        lock (_lock)
         {
-            if (_cachedHistoricalJournal.HasValue &&
-                _cachedHistoricalJournal.Value.MarketDataCount == sortedMarket.Count &&
-                _cachedHistoricalJournal.Value.LastDate == lastMarketDate)
-            {
-                return _cachedHistoricalJournal.Value.Result;
-            }
+            _engine?.Dispose();
+            _engine = null;
+            _metrics = null;
         }
+    }
 
-        // Minimum starting evaluation date requires at least 10 training samples (with 7d lookahead buffer)
-        var minEvaluationDate = sortedMarket[0].Date.AddDays(23);
-        var candidateDates = sortedMarket
-            .Where(d => d.Date >= minEvaluationDate)
-            .OrderBy(d => d.Date)
-            .ToList();
-
-        var journalItems = new List<PredictionJournalItem>();
-        PredictorService? activePredictor = null;
-        DateOnly? lastTrainedCutoff = null;
-
-        foreach (var todayMarket in candidateDates)
-        {
-            var date = todayMarket.Date;
-            if (!featuresByDate.TryGetValue(date, out var todayFeatures))
-                continue;
-
-            // Retrain expanding-window model weekly (every 7 days) strictly on data prior to date.AddDays(-7)
-            var currentCutoff = date.AddDays(-7);
-            if (activePredictor == null || !lastTrainedCutoff.HasValue || (currentCutoff.DayNumber - lastTrainedCutoff.Value.DayNumber) >= 7)
-            {
-                var historicalMarket = sortedMarket.Where(m => m.Date <= currentCutoff).ToList();
-                var historicalFeatures = sortedFeatures.Where(f => f.Date <= currentCutoff).ToList();
-
-                var trainDataset = turningPointDetector.BuildTrainingDataset(historicalMarket, historicalFeatures, lookaheadDays: 7);
-                var newPredictor = new PredictorService();
-                if (trainDataset.Count >= 10)
-                {
-                    try
-                    {
-                        newPredictor.TrainModel(trainDataset);
-                    }
-                    catch
-                    {
-                        // Fallback to internal rules if training fails
-                    }
-                }
-                activePredictor = newPredictor;
-                lastTrainedCutoff = currentCutoff;
-            }
-
-            // Predict using strictly out-of-sample expanding model
-            var pred = activePredictor.Predict(todayFeatures, todayMarket);
-
-            // Forward outcome evaluation across subsequent 7 candles
-            var forwardCandles = sortedMarket
-                .Where(c => c.Date > date && c.Date <= date.AddDays(7))
-                .OrderBy(c => c.Date)
-                .ToList();
-
-            int elapsedDays = lastMarketDate.DayNumber - date.DayNumber;
-            string outcome = "PENDING";
-            decimal? realizedReturn = null;
-            decimal? unrealizedReturn = null;
-            DateOnly? resolvedDate = null;
-            decimal? resolvedPrice = null;
-            bool resolved = false;
-
-            decimal targetPrice = pred.TargetPrice;
-            decimal invalidationPrice = pred.InvalidationPrice;
-            decimal targetChangePct = pred.TargetChangePercent;
-            decimal invalidationChangePct = pred.InvalidationChangePercent;
-            decimal rrRatio = pred.RiskRewardRatio > 0 ? pred.RiskRewardRatio : 2.0m;
-
-            if (pred.Signal == "BULLISH_OPPORTUNITY")
-            {
-                foreach (var c in forwardCandles)
-                {
-                    if (c.BtcHigh >= targetPrice)
-                    {
-                        outcome = "TARGET_HIT";
-                        realizedReturn = Math.Abs(targetChangePct);
-                        resolvedDate = c.Date;
-                        resolvedPrice = targetPrice;
-                        resolved = true;
-                        break;
-                    }
-                    if (c.BtcLow <= invalidationPrice)
-                    {
-                        outcome = "INVALIDATED";
-                        realizedReturn = -Math.Abs(invalidationChangePct);
-                        resolvedDate = c.Date;
-                        resolvedPrice = invalidationPrice;
-                        resolved = true;
-                        break;
-                    }
-                }
-
-                if (!resolved)
-                {
-                    if (elapsedDays >= 7 && forwardCandles.Count > 0)
-                    {
-                        var lastC = forwardCandles[^1];
-                        decimal ret = (lastC.BtcClose - pred.BtcClose) / pred.BtcClose;
-                        outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
-                        realizedReturn = Math.Round(ret, 4);
-                        resolvedDate = lastC.Date;
-                        resolvedPrice = lastC.BtcClose;
-                        resolved = true;
-                    }
-                    else if (lastMarketDate > date)
-                    {
-                        var latestCandle = sortedMarket[^1];
-                        unrealizedReturn = Math.Round((latestCandle.BtcClose - pred.BtcClose) / pred.BtcClose, 4);
-                    }
-                }
-            }
-            else if (pred.Signal == "BEARISH_RISK")
-            {
-                foreach (var c in forwardCandles)
-                {
-                    if (c.BtcLow <= targetPrice)
-                    {
-                        outcome = "TARGET_HIT";
-                        realizedReturn = Math.Abs(targetChangePct);
-                        resolvedDate = c.Date;
-                        resolvedPrice = targetPrice;
-                        resolved = true;
-                        break;
-                    }
-                    if (c.BtcHigh >= invalidationPrice)
-                    {
-                        outcome = "INVALIDATED";
-                        realizedReturn = -Math.Abs(invalidationChangePct);
-                        resolvedDate = c.Date;
-                        resolvedPrice = invalidationPrice;
-                        resolved = true;
-                        break;
-                    }
-                }
-
-                if (!resolved)
-                {
-                    if (elapsedDays >= 7 && forwardCandles.Count > 0)
-                    {
-                        var lastC = forwardCandles[^1];
-                        decimal ret = (pred.BtcClose - lastC.BtcClose) / pred.BtcClose;
-                        outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
-                        realizedReturn = Math.Round(ret, 4);
-                        resolvedDate = lastC.Date;
-                        resolvedPrice = lastC.BtcClose;
-                        resolved = true;
-                    }
-                    else if (lastMarketDate > date)
-                    {
-                        var latestCandle = sortedMarket[^1];
-                        unrealizedReturn = Math.Round((pred.BtcClose - latestCandle.BtcClose) / pred.BtcClose, 4);
-                    }
-                }
-            }
-            else
-            {
-                // NEUTRAL_HOLD: Capital Preservation (Cash Hold during chop / falling knife)
-                if (elapsedDays >= 7 && forwardCandles.Count > 0)
-                {
-                    var lastC = forwardCandles[^1];
-                    outcome = "EXPIRED_PROFIT"; // Capital successfully preserved in 100% cash
-                    realizedReturn = 0.0m;
-                    resolvedDate = lastC.Date;
-                    resolvedPrice = lastC.BtcClose;
-                    resolved = true;
-                }
-            }
-
-            journalItems.Add(new PredictionJournalItem
-            {
-                Date = date,
-                BtcClose = pred.BtcClose,
-                Signal = pred.Signal,
-                BullishProbability = pred.BullishProbability,
-                MarketRegime = pred.MarketRegime,
-                Confidence = pred.Confidence,
-                TargetPrice = targetPrice,
-                InvalidationPrice = invalidationPrice,
-                TargetChangePercent = targetChangePct,
-                InvalidationChangePercent = invalidationChangePct,
-                RiskRewardRatio = rrRatio,
-                HorizonDays = 7,
-                ConsensusVerdict = pred.Ensemble?.ConsensusVerdict,
-                ConsensusAgreementPercent = pred.Ensemble?.ConsensusAgreementPercent,
-                OutcomeStatus = outcome,
-                RealizedReturnPercent = realizedReturn,
-                UnrealizedReturnPercent = unrealizedReturn,
-                ResolvedDate = resolvedDate,
-                ResolvedPrice = resolvedPrice,
-                ElapsedDays = Math.Min(elapsedDays, 7)
-            });
-        }
-
-        // Aggregate statistics
-        var resolvedItems = journalItems.Where(i => i.OutcomeStatus != "PENDING").ToList();
-        int resolvedCount = resolvedItems.Count;
-        int pendingCount = journalItems.Count - resolvedCount;
-
-        int targetHits = resolvedItems.Count(i => i.OutcomeStatus == "TARGET_HIT");
-        int invalidations = resolvedItems.Count(i => i.OutcomeStatus == "INVALIDATED");
-        int expiredProfits = resolvedItems.Count(i => i.OutcomeStatus == "EXPIRED_PROFIT");
-        int expiredLosses = resolvedItems.Count(i => i.OutcomeStatus == "EXPIRED_LOSS");
-
-        int winningTrades = targetHits + expiredProfits;
-        decimal winRate = resolvedCount > 0 ? Math.Round((decimal)winningTrades / resolvedCount * 100m, 1) : 0m;
-        decimal targetHitRate = resolvedCount > 0 ? Math.Round((decimal)targetHits / resolvedCount * 100m, 1) : 0m;
-
-        decimal totalGains = resolvedItems.Where(i => (i.RealizedReturnPercent ?? 0m) > 0).Sum(i => i.RealizedReturnPercent ?? 0m);
-        decimal totalLosses = Math.Abs(resolvedItems.Where(i => (i.RealizedReturnPercent ?? 0m) < 0).Sum(i => i.RealizedReturnPercent ?? 0m));
-
-        decimal profitFactor = totalLosses > 0 ? Math.Round(totalGains / totalLosses, 2) : (totalGains > 0 ? 99m : 1m);
-        decimal cumulativeReturn = Math.Round(resolvedItems.Sum(i => i.RealizedReturnPercent ?? 0m) * 100m, 1);
-        decimal avgReturn = resolvedCount > 0 ? Math.Round(cumulativeReturn / resolvedCount, 2) : 0m;
-
-        var stats = new LiveJournalStats
-        {
-            TotalPredictions = journalItems.Count,
-            ResolvedPredictions = resolvedCount,
-            PendingPredictions = pendingCount,
-            TargetHits = targetHits,
-            Invalidations = invalidations,
-            ExpiredProfits = expiredProfits,
-            ExpiredLosses = expiredLosses,
-            WinRatePercent = winRate,
-            TargetHitRatePercent = targetHitRate,
-            ProfitFactor = profitFactor,
-            CumulativeReturnPercent = cumulativeReturn,
-            AverageReturnPercent = avgReturn
-        };
-
-        // Equity curve
-        var equityPoints = new List<JournalEquityPoint>();
-        decimal runningPnl = 0m;
-        decimal peakPnl = 0m;
-
-        foreach (var rItem in resolvedItems.OrderBy(i => i.ResolvedDate ?? i.Date))
-        {
-            runningPnl += (rItem.RealizedReturnPercent ?? 0m) * 100m;
-            if (runningPnl > peakPnl)
-                peakPnl = runningPnl;
-
-            decimal drawdown = peakPnl > 0 ? Math.Min(0m, runningPnl - peakPnl) : 0m;
-
-            equityPoints.Add(new JournalEquityPoint
-            {
-                Date = rItem.ResolvedDate ?? rItem.Date,
-                CumulativeReturnPercent = Math.Round(runningPnl, 2),
-                DrawdownPercent = Math.Round(drawdown, 2)
-            });
-        }
-
-        var response = new PredictionJournalResponse
-        {
-            Mode = "historical",
-            Stats = stats,
-            Items = journalItems.OrderByDescending(i => i.Date).ToList(),
-            EquityCurve = equityPoints
-        };
-
-        lock (_cacheLock)
-        {
-            _cachedHistoricalJournal = (sortedMarket.Count, lastMarketDate, response);
-        }
-
-        return response;
+    public PredictionJournalResponse GenerateWalkForwardJournal(
+        IReadOnlyList<DailyMarketData> marketData, IReadOnlyList<DailyFeatures> features, ITurningPointDetector turningPointDetector)
+    {
+        var todayUtc = DateOnly.FromDateTime(DateTime.UtcNow);
+        var closed = marketData.Where(d => d.Date < todayUtc).ToList();
+        return PredictionOutcomeResolver.Journal(
+            GenerateWalkForwardPredictions(closed, features, turningPointDetector)
+                .Select(p => PredictionOutcomeResolver.Resolve(p, closed)), "historical");
     }
 }

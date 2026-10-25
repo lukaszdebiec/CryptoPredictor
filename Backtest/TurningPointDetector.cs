@@ -1,4 +1,5 @@
 using CryptoPredictor.Data;
+using CryptoPredictor.Prediction;
 
 namespace CryptoPredictor.Backtest;
 
@@ -97,14 +98,14 @@ public class TurningPointDetector : ITurningPointDetector
 
                 for (int k = i + 1; k <= i + 7; k++)
                 {
-                    if (sorted[k].BtcHigh >= tpPrice)
-                    {
-                        tpHit = true;
-                        break;
-                    }
                     if (sorted[k].BtcLow <= slPrice)
                     {
                         slHit = true;
+                        break;
+                    }
+                    if (sorted[k].BtcHigh >= tpPrice)
+                    {
+                        tpHit = true;
                         break;
                     }
                 }
@@ -134,28 +135,44 @@ public class TurningPointDetector : ITurningPointDetector
         IReadOnlyList<DailyMarketData> data,
         IReadOnlyList<DailyFeatures> features,
         int lookaheadDays = 7,
-        decimal bullishThreshold = 0.03m)
+        decimal bullishThreshold = 0m)
     {
-        var labels = DetectTurningPoints(data, window: 5, minReversalPercent: bullishThreshold);
-        var labelByDate = labels.ToDictionary(l => l.Date);
-
+        if (lookaheadDays < 1)
+            throw new ArgumentOutOfRangeException(nameof(lookaheadDays));
+        if (bullishThreshold != 0m)
+            throw new ArgumentException("Directional labels use a zero-return threshold.", nameof(bullishThreshold));
+        var sorted = data.OrderBy(d => d.Date).ToList();
+        var marketByDate = sorted.ToDictionary(d => d.Date);
+        var indexByDate = sorted.Select((d, i) => (d.Date, i)).ToDictionary(x => x.Date, x => x.i);
         var samples = new List<ModelTrainingSample>();
-
         foreach (var feat in features.OrderBy(f => f.Date))
         {
-            if (labelByDate.TryGetValue(feat.Date, out var label))
+            if (!indexByDate.TryGetValue(feat.Date, out var i) || i < PredictionPolicy.WarmupDays - 1)
+                continue;
+            var outcomeDate = feat.Date.AddDays(lookaheadDays);
+            if (!marketByDate.TryGetValue(outcomeDate, out var outcome) || sorted[i].BtcClose <= 0m)
+                continue;
+            // Every feature lookback and every outcome day must exist; row offsets are not calendar days.
+            if (sorted[i - PredictionPolicy.WarmupDays + 1].Date != feat.Date.AddDays(1 - PredictionPolicy.WarmupDays) ||
+                !Enumerable.Range(0, PredictionPolicy.WarmupDays + lookaheadDays)
+                    .All(k => marketByDate.TryGetValue(feat.Date.AddDays(k + 1 - PredictionPolicy.WarmupDays), out var bar) && bar.BtcClose > 0m))
+                continue;
+            var forwardReturn = outcome.BtcClose / sorted[i].BtcClose - 1m;
+            samples.Add(new ModelTrainingSample
             {
-                // We only include samples where the forward outcome is fully known (avoids lookahead leakage)
-                if (label.ForwardReturn7d.HasValue)
+                Date = feat.Date,
+                OutcomeDate = outcomeDate,
+                HorizonDays = lookaheadDays,
+                ForwardReturn = forwardReturn,
+                Features = feat,
+                Label = new LabeledMarketDay
                 {
-                    samples.Add(new ModelTrainingSample
-                    {
-                        Date = feat.Date,
-                        Features = feat,
-                        Label = label
-                    });
+                    Date = feat.Date,
+                    BtcClose = sorted[i].BtcClose,
+                    ForwardReturn7d = lookaheadDays == 7 ? forwardReturn : null,
+                    IsForward7dBullish = lookaheadDays == 7 ? forwardReturn > 0m : null
                 }
-            }
+            });
         }
 
         return samples;

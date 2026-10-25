@@ -4,6 +4,7 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
+  pull_request:
 
 jobs:
   build-and-test:
@@ -23,6 +24,12 @@ jobs:
 
       - name: Build Application (Release)
         run: dotnet build CryptoPredictor.csproj --configuration Release --no-restore
+
+      - name: Test prediction and execution invariants
+        run: dotnet test Tests/CryptoPredictor.Tests.csproj --configuration Release
+
+      - name: Test journal calculations
+        run: node --test Tests/journal-math.test.cjs
 
   deploy:
     name: Deploy to GCP Always Free VM

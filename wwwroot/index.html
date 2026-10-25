@@ -60,14 +60,14 @@
       <div id="hero-signal-card" class="card hero-prediction-card">
         <div>
           <div class="card-label">
-            <span>ML Ensemble Consensus</span>
+            <span>BTC Direction · 7D</span>
             <div style="display: flex; gap: 0.45rem; align-items: center;">
               <span id="badge-consensus" class="consensus-tag" style="display: none;">--% Agree</span>
               <span id="label-prediction-date" style="font-family: var(--font-mono); font-size: 0.72rem;">--</span>
               <span class="tooltip-trigger" tabindex="0">?
                 <span class="tooltip-content">
-                  <strong>Multi-Model Ensemble Consensus</strong>
-                  Dynamically weighted council of 4 diverse quantitative models: FastTree (GBDT), FastForest (Bagged Random Forest), SDCA Logistic Regression (Linear GLM), and Quant Rule-Based Expert. Weights adapt dynamically based on out-of-sample AUC performance and Kaufman Market Regime (Trend vs. Mean-Reversion).
+                  <strong>7-day directional estimate</strong>
+                  Probability estimate that the daily closing price in seven days exceeds the signal-day close. Probabilities have not been independently calibrated. No trade is issued without sufficient history and a better chronological validation result than the baseline.
                 </span>
               </span>
             </div>
@@ -79,7 +79,7 @@
         </div>
         <div>
           <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.78rem; color: var(--text-muted); margin-top: 0.85rem;">
-            <span>Ensemble Bullish Probability</span>
+            <span>P(close +7D > signal close) · estimate</span>
             <span id="text-bullish-prob" style="font-family: var(--font-mono); font-weight: 700; color: var(--text-main);">--%</span>
           </div>
           <div class="prob-bar-track">
@@ -109,7 +109,7 @@
             <span class="tooltip-trigger" tabindex="0">?
               <span class="tooltip-content">
                 <strong>Bitcoin Close (Spot)</strong>
-                Real-time spot closing price, 24h percentage return, and intraday low/high range from Binance.
+                Latest closed candle price, percentage return and low/high range from the selected timeframe.
               </span>
             </span>
           </div>
@@ -131,7 +131,7 @@
             <span class="tooltip-trigger" tabindex="0">?
               <span class="tooltip-content">
                 <strong>Fibonacci Golden Pocket</strong>
-                30-day swing retracement ratio. The 0.618 - 0.650 zone ('Golden Pocket') is a high-probability institutional reaction and reversal area.
+                30-day swing retracement ratio. The 0.618–0.650 zone is a descriptive reference level; predictive value has not been established.
               </span>
             </span>
           </div>
@@ -150,7 +150,7 @@
             <span class="tooltip-trigger" tabindex="0">?
               <span class="tooltip-content">
                 <strong>Wave Dynamics (KER 10d)</strong>
-                Kaufman Efficiency Ratio (10d). Values >0.55 indicate strong Elliott Wave impulse momentum (Wave 3/5), while &lt;0.25 indicate corrective ABC chop.
+                Kaufman Efficiency Ratio (10d). Values >0.55 describe efficient directional movement; values &lt;0.25 describe a less directional price path. This does not identify Elliott waves.
               </span>
             </span>
           </div>
@@ -255,7 +255,7 @@
             <div id="liquidity-badge-container" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
               <span id="badge-liq-magnet" class="liq-badge" style="display: none;">Liq Magnet: --</span>
               <span id="badge-forecast-target" class="target-badge" style="display: none;">Target: --</span>
-              <button id="btn-toggle-cone" class="cone-toggle-btn active" title="Toggle 7-Day Forecast Volatility Cone & Price Targets (TP / SL)">📐 7D Forecast Cone</button>
+              <button id="btn-toggle-cone" class="cone-toggle-btn active" title="Illustrative volatility bands; these are not calibrated price forecasts">📐 7D Volatility Bands</button>
             </div>
           </div>
 
@@ -446,7 +446,7 @@
           <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.25rem; flex-wrap: wrap;">
             <span id="tm-banner-tp" class="target-pill">🎯 TP: $--</span>
             <span id="tm-banner-sl" class="invalidation-pill">🛑 SL: $--</span>
-            <span id="tm-banner-rr" class="rr-pill">R:R 2.0</span>
+            <span id="tm-banner-rr" class="rr-pill">R:R —</span>
           </div>
         </div>
 
@@ -495,7 +495,7 @@
       <div id="tm-council-section" class="tm-council-section" style="display: none;">
         <div class="panel-heading" style="margin-bottom: 0.5rem;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          <span>Głosowanie Rady Modeli w wybranym dniu (Point-in-Time)</span>
+          <span>Założenia prognozy w wybranym dniu</span>
         </div>
         <div id="tm-votes-grid" class="tm-votes-grid"></div>
         <div id="tm-drivers-box" class="tm-drivers-box"></div>
@@ -511,7 +511,7 @@
               <span>Dziennik Predykcji & Walk-Forward Ledger</span>
             </div>
             <span style="font-size: 0.75rem; color: var(--text-dim);" id="journal-mode-subtitle">
-              Empiryczna weryfikacja modeli AI na danych historycznych (~180 dni, okno kroczące bez wycieku w przyszłość)
+              Historyczne estymaty kierunku 7D i rozliczenia aktywnych sygnałów
             </span>
           </div>
 
@@ -530,8 +530,9 @@
         <div class="journal-explain-banner">
           <span class="banner-icon">💡</span>
           <div>
-            <strong>Dlaczego pojedyncze backtesty mogą wydawać się "średnie"?</strong>
-            W tradingu ilościowym z asymetrią ryzyka <strong>R:R = 2.0</strong> (Target +8.0% vs Stop-Loss -4.0%), punkt rentowności (break-even) wynosi zaledwie <strong>33.3%</strong>. Przy trafności <strong>50–55%</strong> zyskownych transakcji strategia generuje potężną przewagę statystyczną (Profit Factor &gt; 1.5). Poniższy dziennik walk-forward weryfikuje każde 7-dniowe okno na czystych danych bez wycieku w przyszłość.
+            <strong>Jak czytać wyniki?</strong>
+            Model estymuje kierunek ceny zamknięcia za 7 dni. Targety i stop-loss są oddzielną polityką ryzyka (domyślnie R:R = 1,5). Wyniki uwzględniają założone koszty, ale nie koszt finansowania shortów. Dziennik zawiera nakładające się sygnały: suma ich zwrotów nie jest zwrotem jednego portfela. Do oceny portfela służy backtest z jedną pozycją naraz. Brak transakcji nie jest liczony jako wygrana.
+
           </div>
         </div>
 
@@ -539,13 +540,13 @@
         <div class="journal-controls-toolbar">
           <!-- Conviction Threshold Selector -->
           <div class="j-toolbar-group">
-            <span class="j-toolbar-label">PRÓG PEWNOŚCI MODELI (CONVICTION):</span>
+            <span class="j-toolbar-label">PRÓG ESTYMATY MODELU (BEZ KALIBRACJI):</span>
             <div class="j-conviction-selector">
               <button class="j-conv-btn active" data-conv="0.50" title="Wszystkie dni bez filtrowania szumu">50% (Wszystkie)</button>
               <button class="j-conv-btn" data-conv="0.60" title="Eliminacja wąskich konsolidacji (prob ≥ 60% lub ≤ 40%)">≥ 60%</button>
-              <button class="j-conv-btn" data-conv="0.65" title="Standard quant: tylko silna przewaga statystyczna">≥ 65% (Quant)</button>
-              <button class="j-conv-btn" data-conv="0.70" title="Wysokie przekonanie: wyraźny sygnał kierunkowy">≥ 70% (High)</button>
-              <button class="j-conv-btn" data-conv="0.75" title="Ekstremalne prawdopodobieństwo modelu">≥ 75% (Extreme)</button>
+              <button class="j-conv-btn" data-conv="0.65" title="Filtr estymaty; próg nie dowodzi przewagi statystycznej">≥ 65%</button>
+              <button class="j-conv-btn" data-conv="0.70" title="Wysokie przekonanie: wyraźny sygnał kierunkowy">≥ 70%</button>
+              <button class="j-conv-btn" data-conv="0.75" title="Ekstremalne prawdopodobieństwo modelu">≥ 75%</button>
             </div>
           </div>
 
@@ -563,7 +564,7 @@
           </div>
 
           <!-- Consensus Quality Toggle -->
-          <div class="j-toolbar-group">
+          <div class="j-toolbar-group" hidden>
             <span class="j-toolbar-label">JAKOŚĆ KONSENSUSU:</span>
             <div class="j-consensus-toggle">
               <button class="j-cons-btn active" id="btn-jcons-all" data-cons="all">Dowolny</button>
@@ -574,11 +575,11 @@
 
         <!-- Performance Stat Badges -->
         <div id="journal-stats-bar" class="journal-stats-bar">
-          <div class="journal-stat-item" title="Odsetek zyskownych zagrań (TP HIT + Expired Profit) w stosunku do wszystkich rozstrzygniętych transakcji">
+          <div class="journal-stat-item" title="Odsetek rozstrzygniętych aktywnych sygnałów z dodatnim wynikiem po założonych kosztach">
             <span class="j-stat-label">WIN RATE</span>
             <span id="j-stat-winrate" class="j-stat-val">--%</span>
           </div>
-          <div class="journal-stat-item" title="Odsetek transakcji, które osiągnęły pełny cel zysku (+8.0%) w ciągu 7 dni">
+          <div class="journal-stat-item" title="Odsetek aktywnych transakcji, które osiągnęły swój cel zysku w ciągu 7 dni">
             <span class="j-stat-label">TARGET HIT RATE</span>
             <span id="j-stat-targetrate" class="j-stat-val">--%</span>
           </div>
@@ -587,7 +588,7 @@
             <span id="j-stat-profitfactor" class="j-stat-val">--</span>
           </div>
           <div class="journal-stat-item" title="Suma skumulowanego zwrotu ze wszystkich zakończonych pozycji (PnL)">
-            <span class="j-stat-label">CUMULATIVE PNL</span>
+            <span class="j-stat-label">SUMA ZWROTÓW SYGNAŁÓW</span>
             <span id="j-stat-cumpnl" class="j-stat-val">--%</span>
           </div>
           <div class="journal-stat-item" title="Liczba pozycji rozstrzygniętych / Liczba pozycji będących aktualnie w toku (7 dni)">
@@ -642,6 +643,7 @@
 
   <!-- Scripts -->
   <script src="/js/lightweight-charts.standalone.production.js"></script>
-  <script src="/js/app.js?v=1.9"></script>
+  <script src="/js/journal-math.js?v=2.0"></script>
+  <script src="/js/app.js?v=2.0"></script>
 </body>
 </html>
