@@ -2365,6 +2365,445 @@
     if (statusText) statusText.textContent = 'Zresetowano do dnia T. Kliknij ▶ Odtwórz, aby ponownie odkryć przyszłość.';
   }
 
+  // ==========================================================================
+  // Priority 18: 4H Intraday Tactical Alpha Module (Orderflow & Wyckoff)
+  // ==========================================================================
+
+  let intradayChart = null;
+  let intradayCandleSeries = null;
+  let intradayTpLine = null;
+  let intradaySlLine = null;
+  let intradayDataLoaded = false;
+  let cachedIntradayCandles = null;
+  let cachedIntradayPrediction = null;
+
+  function initIntradayModule() {
+    const btnDaily = document.getElementById('tab-btn-daily');
+    const btnIntraday = document.getElementById('tab-btn-intraday');
+    const viewDaily = document.getElementById('view-daily-strategy');
+    const viewIntraday = document.getElementById('view-intraday-strategy');
+    const btnRefresh = document.getElementById('btn-intraday-refresh');
+
+    if (btnDaily && btnIntraday && viewDaily && viewIntraday) {
+      btnDaily.addEventListener('click', () => {
+        btnDaily.classList.add('active');
+        btnIntraday.classList.remove('active');
+        viewDaily.style.display = 'block';
+        viewIntraday.style.display = 'none';
+      });
+
+      btnIntraday.addEventListener('click', async () => {
+        btnIntraday.classList.add('active');
+        btnDaily.classList.remove('active');
+        viewDaily.style.display = 'none';
+        viewIntraday.style.display = 'block';
+
+        if (!intradayDataLoaded) {
+          await loadIntradayData();
+        } else if (intradayChart) {
+          setTimeout(() => {
+            const container = document.getElementById('chart-intraday-container');
+            if (container && intradayChart) {
+              intradayChart.applyOptions({ width: container.clientWidth });
+              intradayChart.timeScale().fitContent();
+            }
+          }, 60);
+        }
+      });
+    }
+
+    if (btnRefresh) {
+      btnRefresh.addEventListener('click', async () => {
+        btnRefresh.disabled = true;
+        btnRefresh.innerHTML = `<span class="intraday-pulse-dot"></span> Pobieranie...`;
+        await loadIntradayData();
+        btnRefresh.disabled = false;
+        btnRefresh.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg> Odśwież 4H`;
+      });
+    }
+  }
+
+  function initIntradayChart() {
+    const container = document.getElementById('chart-intraday-container');
+    if (!container || intradayChart || !window.LightweightCharts) return;
+
+    intradayChart = window.LightweightCharts.createChart(container, {
+      width: container.clientWidth || 800,
+      height: 460,
+      layout: {
+        background: { type: 'solid', color: '#090e1a' },
+        textColor: '#94a3b8',
+        fontSize: 11,
+        fontFamily: "'JetBrains Mono', monospace"
+      },
+      grid: {
+        vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
+        horzLines: { color: 'rgba(255, 255, 255, 0.03)' }
+      },
+      crosshair: {
+        mode: window.LightweightCharts.CrosshairMode.Normal
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(255, 255, 255, 0.08)',
+        scaleMargins: { top: 0.1, bottom: 0.1 }
+      },
+      timeScale: {
+        borderColor: 'rgba(255, 255, 255, 0.08)',
+        timeVisible: true,
+        secondsVisible: false
+      }
+    });
+
+    intradayCandleSeries = intradayChart.addSeries(window.LightweightCharts.CandlestickSeries, {
+      upColor: '#10b981',
+      downColor: '#f43f5e',
+      borderVisible: false,
+      wickUpColor: '#10b981',
+      wickDownColor: '#f43f5e'
+    });
+
+    window.addEventListener('resize', () => {
+      if (intradayChart && container) {
+        intradayChart.applyOptions({ width: container.clientWidth });
+      }
+    });
+  }
+
+  async function loadIntradayData() {
+    try {
+      const [predResp, candlesResp, journalResp] = await Promise.all([
+        fetch('/api/intraday/prediction'),
+        fetch('/api/intraday/candles?limit=120'),
+        fetch('/api/intraday/journal')
+      ]);
+
+      if (!predResp.ok) throw new Error('Nie udało się pobrać prognozy 4H');
+      const pred = await predResp.json();
+      cachedIntradayPrediction = pred;
+
+      renderIntradayPrediction(pred);
+
+      if (candlesResp.ok) {
+        const candles = await candlesResp.json();
+        cachedIntradayCandles = candles;
+        renderIntradayChart(candles, pred);
+      }
+
+      if (journalResp.ok) {
+        const journal = await journalResp.json();
+        renderIntradayJournal(journal);
+      }
+
+      intradayDataLoaded = true;
+      showToast('Zaktualizowano dane silnika taktycznego 4H!', 'success');
+    } catch (err) {
+      console.error('Błąd pobierania danych intraday 4H:', err);
+      showToast('Błąd ładowania danych 4H: ' + err.message, 'error');
+    }
+  }
+
+  function renderIntradayPrediction(pred) {
+    if (!pred) return;
+
+    // Timestamp
+    const tsEl = document.getElementById('intraday-timestamp');
+    if (tsEl && pred.timestamp) {
+      const d = new Date(pred.timestamp);
+      tsEl.textContent = `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} UTC`;
+    }
+
+    // Signal badge
+    const badgeEl = document.getElementById('intraday-signal-badge');
+    const confEl = document.getElementById('intraday-confidence-text');
+    if (badgeEl) {
+      if (pred.signal === 'BULLISH_TACTICAL') {
+        badgeEl.textContent = 'BULLISH TACTICAL 🟢';
+        badgeEl.className = 'signal-badge bullish';
+      } else if (pred.signal === 'BEARISH_TACTICAL') {
+        badgeEl.textContent = 'BEARISH TACTICAL 🔴';
+        badgeEl.className = 'signal-badge bearish';
+      } else {
+        badgeEl.textContent = 'NEUTRAL CHOP ⚪';
+        badgeEl.className = 'signal-badge neutral';
+      }
+    }
+
+    if (confEl) {
+      const dirText = pred.signal === 'BULLISH_TACTICAL'
+        ? 'Przewaga taktyczna popytu (szukanie wejść Long po testach płynności)'
+        : pred.signal === 'BEARISH_TACTICAL'
+          ? 'Przewaga taktyczna podaży (szukanie wejść Short po odrzuceniu oporów)'
+          : 'Konsolidacja horyzontalna - unikać otwierania pozycji w środku zakresu';
+      confEl.textContent = `Przekonanie: ${pred.confidence} • ${dirText}`;
+    }
+
+    // Probability Bar
+    const probValEl = document.getElementById('intraday-prob-val');
+    const probBarEl = document.getElementById('intraday-prob-bar');
+    const probPct = Math.round((pred.tacticalProbability || 0.5) * 100);
+    if (probValEl) probValEl.textContent = `${probPct}%`;
+    if (probBarEl) {
+      probBarEl.style.width = `${Math.max(10, Math.min(95, probPct))}%`;
+      probBarEl.style.background = pred.signal === 'BULLISH_TACTICAL'
+        ? '#10b981'
+        : (pred.signal === 'BEARISH_TACTICAL' ? '#f43f5e' : '#f59e0b');
+    }
+
+    // Target, SL & R:R
+    const tpEl = document.getElementById('intraday-tp-val');
+    const slEl = document.getElementById('intraday-sl-val');
+    const rrEl = document.getElementById('intraday-rr-val');
+
+    const tpChg = (pred.targetChangePercent * 100).toFixed(1);
+    const slChg = (pred.invalidationChangePercent * 100).toFixed(1);
+
+    if (tpEl) tpEl.textContent = `$${Number(pred.targetPrice).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} (+${tpChg}%)`;
+    if (slEl) slEl.textContent = `$${Number(pred.invalidationPrice).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} (-${slChg}%)`;
+    if (rrEl) rrEl.textContent = `1 : ${Number(pred.riskRewardRatio || 1.4).toFixed(2)}`;
+
+    // Session Pill
+    const sessIconEl = document.getElementById('intraday-session-icon');
+    const sessNameEl = document.getElementById('intraday-session-name');
+    if (sessNameEl) {
+      const raw = pred.rawSession || 'Weekend';
+      const icon = raw === 'NewYork' ? '🗽' : raw === 'London' ? '💂' : raw === 'Asia' ? '🌏' : '🌴';
+      if (sessIconEl) sessIconEl.textContent = icon;
+      sessNameEl.textContent = `Sesja: ${raw} (${pred.session || ''})`;
+    }
+
+    // Taker Orderflow Meter
+    const takerLabelEl = document.getElementById('intraday-taker-label');
+    const takerZscoreEl = document.getElementById('intraday-taker-zscore');
+    const takerBarEl = document.getElementById('intraday-taker-bar');
+
+    const tRatio = Number(pred.takerBuySellRatio || 1.0);
+    const tZ = Number(pred.takerAggressionZScore || 0.0);
+
+    if (takerLabelEl) takerLabelEl.textContent = `Taker Buy/Sell Ratio: ${tRatio.toFixed(2)}`;
+    if (takerZscoreEl) {
+      const sign = tZ > 0 ? '+' : '';
+      takerZscoreEl.textContent = `Z: ${sign}${tZ.toFixed(1)}σ`;
+      takerZscoreEl.style.color = tZ >= 1.0 ? '#10b981' : (tZ <= -1.0 ? '#f43f5e' : '#38bdf8');
+    }
+    if (takerBarEl) {
+      const barPct = Math.max(5, Math.min(95, ((tRatio - 0.70) / 0.60) * 100));
+      takerBarEl.style.width = `${barPct}%`;
+      takerBarEl.style.background = tRatio >= 1.05
+        ? 'linear-gradient(90deg, #38bdf8, #10b981)'
+        : (tRatio <= 0.95 ? 'linear-gradient(90deg, #f43f5e, #f59e0b)' : 'linear-gradient(90deg, #f59e0b, #38bdf8)');
+    }
+
+    // Metrics Chips
+    const oiValEl = document.getElementById('intraday-oi-val');
+    const oiChgEl = document.getElementById('intraday-oi-chg');
+    const kerValEl = document.getElementById('intraday-ker-val');
+    const rsiValEl = document.getElementById('intraday-rsi-val');
+
+    if (oiValEl) {
+      if (pred.openInterestUsd) {
+        oiValEl.textContent = `$${(Number(pred.openInterestUsd) / 1_000_000_000).toFixed(2)}B`;
+      } else {
+        oiValEl.textContent = '$--';
+      }
+    }
+
+    if (oiChgEl) {
+      const oiChg = Number(pred.oiChange24hPct || 0) * 100;
+      const sign = oiChg >= 0 ? '+' : '';
+      oiChgEl.textContent = `${sign}${oiChg.toFixed(1)}%`;
+      oiChgEl.style.color = oiChg >= 0 ? '#10b981' : '#f43f5e';
+    }
+
+    if (kerValEl) {
+      const ker = Number(pred.kaufmanEfficiencyRatio || 0);
+      const mode = ker >= 0.40 ? 'Trend' : 'Chop';
+      kerValEl.textContent = `${ker.toFixed(2)} (${mode})`;
+    }
+
+    if (rsiValEl) {
+      const rsi = Number(pred.rsi14 || 50);
+      rsiValEl.textContent = `${rsi.toFixed(1)}`;
+      rsiValEl.style.color = rsi >= 70 ? '#f43f5e' : (rsi <= 30 ? '#10b981' : 'var(--text-main)');
+    }
+
+    // Wyckoff SFP Box
+    const sfpBoxEl = document.getElementById('intraday-sfp-box');
+    const sfpIconEl = document.getElementById('intraday-sfp-icon');
+    const sfpTitleEl = document.getElementById('intraday-sfp-title');
+    const sfpDescEl = document.getElementById('intraday-sfp-desc');
+
+    if (sfpBoxEl) {
+      if (pred.isSfpLowSwept) {
+        sfpBoxEl.className = 'sfp-status-box active-sweep';
+        if (sfpIconEl) sfpIconEl.textContent = '🔥';
+        if (sfpTitleEl) sfpTitleEl.textContent = 'Wyckoff Spring / Bear Trap (SFP Low Swept)';
+        if (sfpDescEl) sfpDescEl.textContent = 'Świeca 4H zbiła dołek z ostatnich 24-48h i natychmiast wróciła w zakres. Wybrana płynność sell-side (absorpcja popytowa).';
+      } else if (pred.isSfpHighSwept) {
+        sfpBoxEl.className = 'sfp-status-box active-sweep';
+        if (sfpIconEl) sfpIconEl.textContent = '⚠️';
+        if (sfpTitleEl) sfpTitleEl.textContent = 'Wyckoff Upthrust / Bull Trap (SFP High Swept)';
+        if (sfpDescEl) sfpDescEl.textContent = 'Świeca 4H wybiła szczyt z ostatnich 24-48h, po czym została gwałtownie odrzucona. Wybrana płynność buy-side (dystrybucja).';
+      } else {
+        sfpBoxEl.className = 'sfp-status-box';
+        if (sfpIconEl) sfpIconEl.textContent = '🔍';
+        if (sfpTitleEl) sfpTitleEl.textContent = 'Brak aktywnego polowania na płynność (SFP)';
+        if (sfpDescEl) sfpDescEl.textContent = 'Cena respektuje lokalne poziomy i nie wybiła kluczowych szczytów ani dołków sesyjnych.';
+      }
+    }
+
+    // Drivers List
+    const driversListEl = document.getElementById('intraday-drivers-list');
+    if (driversListEl) {
+      if (pred.keyDrivers && pred.keyDrivers.length > 0) {
+        driversListEl.innerHTML = pred.keyDrivers.map(d => `<li>${escapeHtml(d)}</li>`).join('');
+      } else {
+        driversListEl.innerHTML = '<li>Rynek w stanie lokalnej równowagi bez skrajnych dywergencji orderflow.</li>';
+      }
+    }
+  }
+
+  function renderIntradayChart(candles, pred) {
+    if (!candles || candles.length === 0) return;
+    initIntradayChart();
+    if (!intradayChart || !intradayCandleSeries) return;
+
+    const chartData = candles.map(c => {
+      const timeSec = Math.floor(new Date(c.timestamp).getTime() / 1000);
+      return {
+        time: timeSec,
+        open: Number(c.open),
+        high: Number(c.high),
+        low: Number(c.low),
+        close: Number(c.close)
+      };
+    }).sort((a, b) => a.time - b.time);
+
+    intradayCandleSeries.setData(chartData);
+
+    // Remove old price lines if any
+    if (intradayTpLine) {
+      try { intradayCandleSeries.removePriceLine(intradayTpLine); } catch (_) {}
+      intradayTpLine = null;
+    }
+    if (intradaySlLine) {
+      try { intradayCandleSeries.removePriceLine(intradaySlLine); } catch (_) {}
+      intradaySlLine = null;
+    }
+
+    if (pred && pred.targetPrice > 0) {
+      intradayTpLine = intradayCandleSeries.createPriceLine({
+        price: Number(pred.targetPrice),
+        color: '#10b981',
+        lineWidth: 2,
+        lineStyle: window.LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: `🎯 TP1: $${Number(pred.targetPrice).toLocaleString()}`
+      });
+    }
+
+    if (pred && pred.invalidationPrice > 0) {
+      intradaySlLine = intradayCandleSeries.createPriceLine({
+        price: Number(pred.invalidationPrice),
+        color: '#f43f5e',
+        lineWidth: 2,
+        lineStyle: window.LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: `🛑 SL: $${Number(pred.invalidationPrice).toLocaleString()}`
+      });
+    }
+
+    intradayChart.timeScale().fitContent();
+  }
+
+  function renderIntradayJournal(journal) {
+    if (!journal) return;
+
+    // Stats bar
+    const wrEl = document.getElementById('i4h-stat-winrate');
+    const hrEl = document.getElementById('i4h-stat-hitrate');
+    const pnlEl = document.getElementById('i4h-stat-pnl');
+    const countsEl = document.getElementById('i4h-stat-counts');
+
+    if (wrEl) wrEl.textContent = `${Number(journal.winRatePercent || 0).toFixed(1)}%`;
+    if (hrEl) hrEl.textContent = `${Number(journal.targetHitRatePercent || 0).toFixed(1)}%`;
+
+    if (pnlEl) {
+      const pnl = Number(journal.cumulativeReturnPercent || 0);
+      const sign = pnl >= 0 ? '+' : '';
+      pnlEl.textContent = `${sign}${pnl.toFixed(1)}%`;
+      pnlEl.style.color = pnl >= 0 ? '#10b981' : '#f43f5e';
+    }
+
+    if (countsEl) {
+      countsEl.textContent = `${journal.resolvedSignals || 0} / ${journal.totalSignals || 0}`;
+    }
+
+    // Table
+    const tbody = document.getElementById('intraday-table-body');
+    if (!tbody) return;
+
+    if (!journal.items || journal.items.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem;">Brak sygnałów 4H w historii.</td></tr>';
+      return;
+    }
+
+    const rowsHtml = journal.items.slice().reverse().map(item => {
+      const d = new Date(item.timestamp);
+      const timeStr = `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)}`;
+      const priceStr = `$${Number(item.btcClose).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`;
+      
+      const isBull = item.signal === 'BULLISH_TACTICAL';
+      const isBear = item.signal === 'BEARISH_TACTICAL';
+      const sigBadge = isBull
+        ? '<span class="tag-badge bullish">BULLISH 4H</span>'
+        : (isBear ? '<span class="tag-badge bearish">BEARISH 4H</span>' : '<span class="tag-badge neutral">NEUTRAL CHOP</span>');
+
+      const tpStr = `$${Number(item.targetPrice).toFixed(0)}`;
+      const slStr = `$${Number(item.invalidationPrice).toFixed(0)}`;
+
+      let retHtml = '<span style="color: var(--text-dim);">--</span>';
+      if (item.realizedReturnPercent !== null && item.realizedReturnPercent !== undefined) {
+        const ret = Number(item.realizedReturnPercent) * 100;
+        const sign = ret >= 0 ? '+' : '';
+        const color = ret >= 0 ? '#10b981' : '#f43f5e';
+        retHtml = `<span style="font-family: var(--font-mono); font-weight: 700; color: ${color};">${sign}${ret.toFixed(1)}%</span>`;
+      }
+
+      let statusHtml;
+      switch (item.outcomeStatus) {
+        case 'TARGET_HIT':
+          statusHtml = `<span class="outcome-badge tp-hit">🎯 TP HIT</span>`;
+          break;
+        case 'INVALIDATED':
+          statusHtml = `<span class="outcome-badge sl-hit">🛑 SL HIT</span>`;
+          break;
+        case 'EXPIRED_PROFIT':
+          statusHtml = `<span class="outcome-badge exp-profit">⏱️ EXPIRED (+WIN)</span>`;
+          break;
+        case 'EXPIRED_LOSS':
+          statusHtml = `<span class="outcome-badge exp-loss">⏱️ EXPIRED (-LOSS)</span>`;
+          break;
+        default:
+          statusHtml = `<span class="outcome-badge pending">⏳ W toku (${item.elapsedCandles}/6)</span>`;
+          break;
+      }
+
+      return `
+        <tr>
+          <td style="font-family: var(--font-mono); font-size: 0.75rem;">${timeStr}</td>
+          <td style="font-family: var(--font-mono); font-weight: 600;">${priceStr}</td>
+          <td>${sigBadge}</td>
+          <td><span style="font-size: 0.75rem; color: var(--text-dim);">${item.session}</span></td>
+          <td style="font-family: var(--font-mono); font-size: 0.75rem;"><span style="color: #10b981;">🎯 ${tpStr}</span> • <span style="color: #f43f5e;">🛑 ${slStr}</span></td>
+          <td>${retHtml}</td>
+          <td>${statusHtml}</td>
+        </tr>
+      `;
+    }).join('');
+
+    tbody.innerHTML = rowsHtml;
+  }
+
   // Application Entry Point
   window.addEventListener('DOMContentLoaded', async () => {
     initCharts();
@@ -2380,6 +2819,9 @@
 
     // Priority 15: Initialize Time Machine
     initTimeMachine();
+
+    // Priority 18: Initialize 4H Intraday Tactical Alpha Module
+    initIntradayModule();
   });
 
 })();

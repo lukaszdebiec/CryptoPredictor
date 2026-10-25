@@ -54,8 +54,24 @@
       </div>
     </header>
 
-    <!-- Hero Cards Section -->
-    <section class="hero-grid">
+    <!-- Strategy Mode Switcher Tabs -->
+    <nav class="strat-tabs-nav" aria-label="Strategy Navigation">
+      <button id="tab-btn-daily" class="strat-tab-btn active" data-target="view-daily-strategy">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+        <span>Strategia Główna (1D Swing / Macro)</span>
+      </button>
+      <button id="tab-btn-intraday" class="strat-tab-btn" data-target="view-intraday-strategy">
+        <span class="intraday-pulse-dot"></span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span>Silnik Taktyczny 4H (Orderflow & Wyckoff)</span>
+        <span class="badge-tab-new">NOWOŚĆ 4H</span>
+      </button>
+    </nav>
+
+    <!-- 1D Daily Strategy Main View -->
+    <div id="view-daily-strategy" class="strategy-view-pane active">
+      <!-- Hero Cards Section -->
+      <section class="hero-grid">
       <!-- 1. Current ML Signal & Regime -->
       <div id="hero-signal-card" class="card hero-prediction-card">
         <div>
@@ -630,6 +646,224 @@
         </div>
       </div>
     </section>
+    </div> <!-- /#view-daily-strategy -->
+
+    <!-- =====================================================================
+         4H Intraday Tactical Strategy Module (Orderflow & Wyckoff)
+         ===================================================================== -->
+    <div id="view-intraday-strategy" class="strategy-view-pane" style="display: none;">
+      <!-- 4H Intraday Tactical Header Banner -->
+      <div class="intraday-top-banner">
+        <div class="intraday-banner-left">
+          <div class="intraday-badge">
+            <span class="intraday-pulse-dot"></span>
+            <span>SILNIK TAKTYCZNY 4H (ORDERFLOW & SFP)</span>
+          </div>
+          <div class="intraday-subtext">
+            Krocząca analiza mikrostruktury Binance Futures: Agresja Takerów • Zmiany Open Interest • Polowania na płynność Wyckoffa (SFP) • Sesje London/NY/Asia
+          </div>
+        </div>
+        <div class="intraday-banner-right">
+          <div class="session-pill" id="intraday-session-pill">
+            <span id="intraday-session-icon">🌐</span>
+            <span id="intraday-session-name">Sesja: --</span>
+          </div>
+          <button id="btn-intraday-refresh" class="btn btn-primary" title="Odśwież najświeższe dane 4H z Binance Futures">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            Odśwież 4H
+          </button>
+        </div>
+      </div>
+
+      <!-- 4H Tactical Hero Grid -->
+      <section class="intraday-hero-grid">
+        <!-- 1. Tactical Signal Card -->
+        <div class="card intraday-signal-card">
+          <div class="card-label">
+            <span>Sygnał Taktyczny 4H (12h - 24h)</span>
+            <span id="intraday-timestamp" style="font-family: var(--font-mono); font-size: 0.72rem;">--:-- UTC</span>
+          </div>
+          <div class="signal-headline" style="margin-top: 0.5rem;">
+            <span id="intraday-signal-badge" class="signal-badge neutral">ŁADOWANIE...</span>
+          </div>
+          <div id="intraday-confidence-text" class="regime-text">Ocena prawdopodobieństwa taktycznego...</div>
+
+          <div style="margin-top: 1rem;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text-muted);">
+              <span>Prawdopodobieństwo Przewagi</span>
+              <span id="intraday-prob-val" style="font-family: var(--font-mono); font-weight: 700; color: var(--text-main);">--%</span>
+            </div>
+            <div class="prob-bar-track" style="margin-top: 0.35rem;">
+              <div id="intraday-prob-bar" class="prob-bar-fill" style="width: 50%; background: var(--neutral-blue);"></div>
+            </div>
+          </div>
+
+          <div class="intraday-targets-box">
+            <div class="intraday-target-item target-tp">
+              <span class="target-label">🎯 CEL TAKTYCZNY (TP1)</span>
+              <span id="intraday-tp-val" class="target-val">$--; (+--%)</span>
+            </div>
+            <div class="intraday-target-item target-sl">
+              <span class="target-label">🛑 ZANIEUWAŻNIENIE (SL)</span>
+              <span id="intraday-sl-val" class="target-val">$--; (--%)</span>
+            </div>
+            <div class="intraday-target-item target-rr">
+              <span class="target-label">⚖️ RISK / REWARD</span>
+              <span id="intraday-rr-val" class="target-val">--</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Orderflow & Aggression Gauge Card -->
+        <div class="card intraday-orderflow-card">
+          <div class="card-label">
+            <span>Agresja Takerów & Open Interest (Binance Futures)</span>
+            <span class="tooltip-trigger" tabindex="0">?
+              <span class="tooltip-content">
+                <strong>Taker Buy/Sell Aggression Ratio:</strong>
+                Stosunek wolumenu zleceń rynkowych (Market Buy vs Market Sell) na kontraktach terminowych BTCUSDT. Wartości powyżej 1.15 wskazują na agresywną dominację kupujących, a poniżej 0.85 na paniczną agresję sprzedających. Z-Score normalizuje to do ostatnich 30 świec.
+              </span>
+            </span>
+          </div>
+          
+          <div class="of-meter-section">
+            <div class="of-meter-header">
+              <span id="intraday-taker-label" class="of-meter-title">Taker Ratio: --</span>
+              <span id="intraday-taker-zscore" class="of-meter-zscore">Z: --σ</span>
+            </div>
+            <div class="of-meter-bar-wrapper">
+              <div id="intraday-taker-bar" class="of-meter-bar" style="width: 50%;"></div>
+            </div>
+            <div class="of-meter-ticks">
+              <span>0.70 (Panic Sell)</span>
+              <span>1.00 (Neutral)</span>
+              <span>1.30 (Aggressive Buy)</span>
+            </div>
+          </div>
+
+          <div class="intraday-metrics-grid">
+            <div class="intraday-metric-chip">
+              <span class="chip-label">Open Interest (USD)</span>
+              <span id="intraday-oi-val" class="chip-val">$--</span>
+            </div>
+            <div class="intraday-metric-chip">
+              <span class="chip-label">Zmiana OI 24H</span>
+              <span id="intraday-oi-chg" class="chip-val">--%</span>
+            </div>
+            <div class="intraday-metric-chip">
+              <span class="chip-label">Kaufman ER (24H)</span>
+              <span id="intraday-ker-val" class="chip-val">--</span>
+            </div>
+            <div class="intraday-metric-chip">
+              <span class="chip-label">RSI 14 (4H)</span>
+              <span id="intraday-rsi-val" class="chip-val">--</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Wyckoff SFP & Session Liquidity Radar -->
+        <div class="card intraday-radar-card">
+          <div class="card-label">
+            <span>Radar Płynności & Wyckoff SFP (Sweep)</span>
+            <span class="tooltip-trigger" tabindex="0">?
+              <span class="tooltip-content">
+                <strong>Swing Failure Pattern (SFP):</strong>
+                Wyckoffowska pułapka płynności. Kiedy cena wybija szczyt/dołek z ostatnich 24-48 godzin, po czym w tej samej świecy cofa się i zamyka wewnątrz zakresu.
+              </span>
+            </span>
+          </div>
+
+          <div class="sfp-status-box" id="intraday-sfp-box">
+            <div class="sfp-icon" id="intraday-sfp-icon">🔍</div>
+            <div>
+              <div class="sfp-title" id="intraday-sfp-title">Skanowanie poziomów SFP...</div>
+              <div class="sfp-desc" id="intraday-sfp-desc">Brak aktywnego polowania na płynność w bieżącej świecy.</div>
+            </div>
+          </div>
+
+          <div class="session-intel-box">
+            <div class="session-intel-title">⚡ Wskazówki Taktyczne Sesji & Orderflow:</div>
+            <ul id="intraday-drivers-list" class="session-drivers-list">
+              <li>Ładowanie czynników taktycznych...</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4H Interactive Chart -->
+      <section class="chart-section" style="margin-top: 1.5rem;">
+        <div class="card chart-card">
+          <div class="chart-toolbar">
+            <div class="chart-title">
+              <span>Wykres 4H BTC/USDT & Poziomy Taktyczne</span>
+              <span class="badge" style="background: rgba(99, 102, 241, 0.2); color: var(--accent-cyan); padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem;">Binance 4H Futures</span>
+            </div>
+            <div style="font-size: 0.8rem; color: var(--text-dim);">
+              <span style="color: var(--bullish-green); font-weight: 600;">── Zielona linia: Target TP1</span> • <span style="color: var(--bearish-red); font-weight: 600;">── Czerwona linia: Invalidation SL</span>
+            </div>
+          </div>
+          <div id="chart-intraday-container" style="height: 460px; width: 100%; position: relative;"></div>
+        </div>
+      </section>
+
+      <!-- 4H Walk-Forward Tactical Journal -->
+      <section class="history-section" style="margin-top: 1.5rem;">
+        <div class="card table-card">
+          <div class="journal-header-row">
+            <div>
+              <div class="chart-title">
+                <span>Dziennik Sygnałów Taktycznych 4H (Walk-Forward Ledger)</span>
+              </div>
+              <span style="font-size: 0.75rem; color: var(--text-dim);">
+                Weryfikacja symulacji kroczącej sygnałów 4H (horyzont 24h = 6 świec, cel TP1 vs Stop-Loss)
+              </span>
+            </div>
+          </div>
+
+          <!-- Performance Stat Badges for 4H -->
+          <div class="journal-stats-bar" style="margin-top: 1rem;">
+            <div class="journal-stat-item">
+              <span class="j-stat-label">4H WIN RATE</span>
+              <span id="i4h-stat-winrate" class="j-stat-val">--%</span>
+            </div>
+            <div class="journal-stat-item">
+              <span class="j-stat-label">4H DIRECT TP HIT RATE</span>
+              <span id="i4h-stat-hitrate" class="j-stat-val">--%</span>
+            </div>
+            <div class="journal-stat-item">
+              <span class="j-stat-label">SKUMULOWANY ZWROT (PNL)</span>
+              <span id="i4h-stat-pnl" class="j-stat-val">--%</span>
+            </div>
+            <div class="journal-stat-item">
+              <span class="j-stat-label">ROZSTRZYGNIĘTE / SYGNAŁY</span>
+              <span id="i4h-stat-counts" class="j-stat-val">-- / --</span>
+            </div>
+          </div>
+
+          <!-- Table of 4H Journal Signals -->
+          <div style="overflow-x: auto; margin-top: 1rem;">
+            <table class="custom-table journal-table">
+              <thead>
+                <tr>
+                  <th>Czas Świecy (UTC)</th>
+                  <th>Kurs Otwarcia</th>
+                  <th>Sygnał Taktyczny</th>
+                  <th>Sesja</th>
+                  <th>Cele (TP1 / SL)</th>
+                  <th>Zrealizowany Zwrot</th>
+                  <th>Rozstrzygnięcie (24h)</th>
+                </tr>
+              </thead>
+              <tbody id="intraday-table-body">
+                <tr>
+                  <td colspan="7" style="text-align: center; padding: 2rem;">Ładowanie dziennika taktycznego 4H...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
 
     <!-- Footer -->
     <footer class="footer">

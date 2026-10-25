@@ -194,6 +194,26 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] **Wskaźnik i Ostrzeżenie w Wehikule Czasu (Time-Machine):**
   - Wyświetlanie siły przekonania oraz dynamicznego ostrzeżenia przed szumem konsolidacyjnym na wybranym dniu $T$ w module "Back to the Future".
 
+### Priorytet 18: Dedykowana Zakładka Silnika Taktycznego 4H (Orderflow Binance Futures, Wyckoff SFP & Sesje Giełdowe) ✅
+- [x] **Niezależna Architektura Zakładek (Strategy Mode Navigation):**
+  - Główny przełącznik na szczycie aplikacji: `[ 📊 Strategia Główna (1D Swing / Macro) ]` oraz `[ ⚡ Silnik Taktyczny 4H (Orderflow & Wyckoff) ]`.
+  - Całkowita izolacja modułu 4H od strategii dziennej (zero regresji, zero wpływu na silnik 1D, Time-Machine i główny dziennik).
+- [x] **Ingestion Mikrostruktury Intraday 4H z Binance Futures:**
+  - Pobieranie świec 4H OHLCV z endpointów kontraktów terminowych BTCUSDT.
+  - Prawdziwy wolumen zleceń rynkowych takerów: `takerlongshortRatio` (agresja kupujących vs sprzedających).
+  - Normalizowany Z-Score agresji takerów z ostatnich 30 świec 4H (5 dni).
+  - Zmiana Open Interest 24H (%) oraz całkowita wartość zaangażowanego kapitału w lewarowanych kontraktach.
+  - Tagowanie sesji giełdowych: `Nowy Jork`, `Londyn`, `Azja` oraz `Weekend` (filtr niskiej płynności i fałszywych wybić).
+- [x] **Detekcja Pułapek Płynności Wyckoff SFP (Swing Failure Pattern):**
+  - Algorytmiczne wykrywanie polowań na płynność (liquidity raids / bear & bull traps) w oknie 24–48h.
+  - Identyfikacja wybić kluczowych szczytów i dołków z natychmiastowym powrotem w zakres w tej samej świecy (absorpcja wolumenu).
+- [x] **Dynamiczne Skalowanie Targetów 4H (ATR Volatility Scaling):**
+  - Wyliczanie targetu Take-Profit TP1 (~1.6%–2.8%) i Stop-Loss (~1.2%–1.8%) w oparciu o 4-godzinną zmienność ATR, gwarantujące z góry asymetrię $R:R \ge 1.3$.
+- [x] **Dedykowany Interfejs & Wykres 4H Lightweight Charts:**
+  - Karta sygnału taktycznego 4H, gradientowy miernik agresji takerów, radar płynności Wyckoff SFP oraz chipy parametrów mikrostruktury.
+  - Dedykowany wykres świecowy 4H z naniesionymi przerywanymi poziomami TP1 (zielony) i SL (czerwony).
+  - Osobny dziennik taktyczny 4H (Walk-Forward Ledger na horyzoncie 24h = 6 świec) z pomiarem Win Rate, Target Hit Rate i PnL.
+
 ---
 
 

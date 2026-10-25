@@ -1,9 +1,12 @@
 using CryptoPredictor.Alerts;
 using CryptoPredictor.Backtest;
 using CryptoPredictor.Data.Ingestion;
+using CryptoPredictor.Data.Intraday;
 using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
+using CryptoPredictor.Features.Intraday;
 using CryptoPredictor.Prediction;
+using CryptoPredictor.Prediction.Intraday;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +24,7 @@ builder.Services.AddHttpClient<IDeribitDataService, DeribitDataService>();
 builder.Services.AddHttpClient<IEtfDataService, FarsideEtfService>();
 builder.Services.AddHttpClient<IMacroDataService, MacroDataService>();
 builder.Services.AddHttpClient<ITelegramAlertService, TelegramAlertService>();
+builder.Services.AddHttpClient<IIntradayMarketDataService, IntradayMarketDataService>();
 
 // SQLite Database configuration
 var storageDir = Path.Combine(builder.Environment.ContentRootPath, "Data", "storage");
@@ -41,6 +45,8 @@ builder.Services.AddSingleton<IFeatureCalculator, FeatureCalculator>();
 builder.Services.AddSingleton<ITurningPointDetector, TurningPointDetector>();
 builder.Services.AddSingleton<IPredictorService, PredictorService>();
 builder.Services.AddSingleton<IBacktestEngine, BacktestEngine>();
+builder.Services.AddSingleton<IIntradayFeatureCalculator, IntradayFeatureCalculator>();
+builder.Services.AddSingleton<IIntradayPredictorService, IntradayPredictorService>();
 
 // Background Worker for automated daily 00:05 UTC cycle
 builder.Services.AddHostedService<CryptoPredictor.Background.DailyMarketDataWorker>();
