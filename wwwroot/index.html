@@ -431,9 +431,13 @@
 
         <div class="tm-pred-col">
           <div class="tm-pred-meta">ENSEMBLE BULLISH PROBABILITY:</div>
-          <div style="display: flex; gap: 0.6rem; align-items: baseline; margin-top: 0.25rem;">
+          <div style="display: flex; gap: 0.6rem; align-items: baseline; margin-top: 0.25rem; flex-wrap: wrap;">
             <span id="tm-banner-prob" class="tm-banner-prob-val">--%</span>
             <span id="tm-banner-consensus" class="consensus-tag">--</span>
+            <span id="tm-banner-conviction" class="conv-tag mid" style="display: none;">--</span>
+          </div>
+          <div id="tm-conviction-warning" class="tm-conviction-warning" style="display: none;">
+            <span>⚠️ Niski próg przekonania (&lt;60%) – podwyższone ryzyko szumu w konsolidacji.</span>
           </div>
         </div>
 
@@ -531,6 +535,43 @@
           </div>
         </div>
 
+        <!-- Priority 17: Conviction & Execution Controls Toolbar -->
+        <div class="journal-controls-toolbar">
+          <!-- Conviction Threshold Selector -->
+          <div class="j-toolbar-group">
+            <span class="j-toolbar-label">PRÓG PEWNOŚCI MODELI (CONVICTION):</span>
+            <div class="j-conviction-selector">
+              <button class="j-conv-btn active" data-conv="0.50" title="Wszystkie dni bez filtrowania szumu">50% (Wszystkie)</button>
+              <button class="j-conv-btn" data-conv="0.60" title="Eliminacja wąskich konsolidacji (prob ≥ 60% lub ≤ 40%)">≥ 60%</button>
+              <button class="j-conv-btn" data-conv="0.65" title="Standard quant: tylko silna przewaga statystyczna">≥ 65% (Quant)</button>
+              <button class="j-conv-btn" data-conv="0.70" title="Wysokie przekonanie: wyraźny sygnał kierunkowy">≥ 70% (High)</button>
+              <button class="j-conv-btn" data-conv="0.75" title="Ekstremalne prawdopodobieństwo modelu">≥ 75% (Extreme)</button>
+            </div>
+          </div>
+
+          <!-- Execution Mode Toggle -->
+          <div class="j-toolbar-group">
+            <span class="j-toolbar-label">TRYB SYMULACJI:</span>
+            <div class="j-exec-toggle">
+              <button class="j-exec-btn active" id="btn-jexec-rolling" data-exec="rolling" title="Ciągła ewaluacja prognozy dla każdego dnia niezależnie (rolling 7d)">
+                📊 Ciągły (Każdy dzień)
+              </button>
+              <button class="j-exec-btn" id="btn-jexec-discrete" data-exec="discrete" title="1 pozycja na raz: unika klastrowania strat przy nakładających się pozycjach">
+                🎯 Dyskretny (1 trade naraz)
+              </button>
+            </div>
+          </div>
+
+          <!-- Consensus Quality Toggle -->
+          <div class="j-toolbar-group">
+            <span class="j-toolbar-label">JAKOŚĆ KONSENSUSU:</span>
+            <div class="j-consensus-toggle">
+              <button class="j-cons-btn active" id="btn-jcons-all" data-cons="all">Dowolny</button>
+              <button class="j-cons-btn" id="btn-jcons-strong" data-cons="strong" title="Filtruj wyłącznie dni z werdyktem Strong lub Unanimous Consensus (zgodność ≥ 60%)">⭐ Tylko Silny Konsensus</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Performance Stat Badges -->
         <div id="journal-stats-bar" class="journal-stats-bar">
           <div class="journal-stat-item" title="Odsetek zyskownych zagrań (TP HIT + Expired Profit) w stosunku do wszystkich rozstrzygniętych transakcji">
@@ -601,6 +642,6 @@
 
   <!-- Scripts -->
   <script src="/js/lightweight-charts.standalone.production.js"></script>
-  <script src="/js/app.js?v=1.7"></script>
+  <script src="/js/app.js?v=1.8"></script>
 </body>
 </html>

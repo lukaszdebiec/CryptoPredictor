@@ -1112,11 +1112,14 @@
   }
 
   // ==========================================================================
-  // Priority 16: Historical Prediction Journal & Walk-Forward Trade Ledger
+  // Priority 16 & 17: Prediction Journal, Walk-Forward Ledger & Conviction Gating
   // ==========================================================================
 
   let currentJournalMode = 'historical'; // 'historical' | 'live'
   let currentJournalFilter = 'all'; // 'all' | 'tp' | 'sl' | 'expired' | 'pending' | 'bull' | 'bear'
+  let currentConvictionThreshold = 0.50; // 0.50, 0.60, 0.65, 0.70, 0.75
+  let currentExecutionMode = 'rolling'; // 'rolling' | 'discrete'
+  let currentConsensusFilter = 'all'; // 'all' | 'strong'
   let cachedJournalItems = [];
   let cachedJournalStats = null;
 
@@ -1135,14 +1138,8 @@
       cachedJournalStats = data.stats;
       cachedJournalItems = data.items || [];
 
-      // Update KPI stats cards
-      updateJournalStatsUI(cachedJournalStats);
-
-      // Update filter counts
-      updateJournalFilterCounts(cachedJournalItems);
-
-      // Render table
-      filterAndRenderJournalTable();
+      // Recompute and render with active conviction, execution mode, and filters
+      recalculateAndRenderJournal();
 
     } catch (err) {
       console.error('Failed to load prediction journal:', err);
@@ -1150,6 +1147,95 @@
         tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 2rem; color: #fb7185;">Błąd ładowania dziennika: ${escapeHtml(err.message)}</td></tr>`;
       }
     }
+  }
+
+  function getActiveFilteredDataset() {
+    if (!cachedJournalItems || cachedJournalItems.length === 0) return [];
+
+    let dataset = cachedJournalItems;
+
+    if (currentExecutionMode === 'discrete') {
+      // Discrete single-position simulation: sort oldest to newest, take first valid trade, skip holding period
+      const sorted = [...cachedJournalItems].sort((a, b) => (a.date > b.date ? 1 : -1));
+      const discreteTrades = [];
+      let idx = 0;
+      while (idx < sorted.length) {
+        const it = sorted[idx];
+        const prob = Number(it.bullishProbability);
+        const meetsConv = (prob >= currentConvictionThreshold) || (prob <= (1.0 - currentConvictionThreshold));
+        const meetsCons = currentConsensusFilter === 'strong'
+          ? (it.consensusVerdict && (it.consensusVerdict.includes('Strong') || it.consensusVerdict.includes('Unanimous')) && (it.consensusAgreementPercent >= 60))
+          : true;
+
+        if (meetsConv && meetsCons && it.signal !== 'NEUTRAL_HOLD') {
+          discreteTrades.push(it);
+          const skipDays = it.outcomeStatus !== 'PENDING' ? Math.max(1, it.elapsedDays || 1) : 1;
+          idx += skipDays;
+        } else {
+          idx++;
+        }
+      }
+      dataset = discreteTrades;
+    } else {
+      // Rolling mode: every candidate day meeting conviction and consensus
+      dataset = dataset.filter(it => {
+        const prob = Number(it.bullishProbability);
+        const meetsConv = (prob >= currentConvictionThreshold) || (prob <= (1.0 - currentConvictionThreshold));
+        const meetsCons = currentConsensusFilter === 'strong'
+          ? (it.consensusVerdict && (it.consensusVerdict.includes('Strong') || it.consensusVerdict.includes('Unanimous')) && (it.consensusAgreementPercent >= 60))
+          : true;
+        return meetsConv && meetsCons;
+      });
+    }
+
+    return dataset;
+  }
+
+  function recalculateAndRenderJournal() {
+    const activeDataset = getActiveFilteredDataset();
+
+    // Recompute 5 KPI cards in real-time
+    const resolved = activeDataset.filter(i => i.outcomeStatus !== 'PENDING');
+    const pending = activeDataset.filter(i => i.outcomeStatus === 'PENDING');
+    const targetHits = resolved.filter(i => i.outcomeStatus === 'TARGET_HIT');
+    const invalidations = resolved.filter(i => i.outcomeStatus === 'INVALIDATED');
+    const expiredProfits = resolved.filter(i => i.outcomeStatus === 'EXPIRED_PROFIT');
+    const expiredLosses = resolved.filter(i => i.outcomeStatus === 'EXPIRED_LOSS');
+
+    const wins = targetHits.length + expiredProfits.length;
+    const winRate = resolved.length > 0 ? (wins / resolved.length * 100) : 0;
+    const targetHitRate = resolved.length > 0 ? (targetHits.length / resolved.length * 100) : 0;
+
+    let totalGains = 0;
+    let totalLosses = 0;
+    let cumPnl = 0;
+
+    resolved.forEach(r => {
+      const ret = Number(r.realizedReturnPercent || 0);
+      cumPnl += ret * 100;
+      if (ret > 0) totalGains += ret;
+      else if (ret < 0) totalLosses += Math.abs(ret);
+    });
+
+    const profitFactor = totalLosses > 0 ? (totalGains / totalLosses) : (totalGains > 0 ? 99 : 1);
+
+    const statsObj = {
+      totalPredictions: activeDataset.length,
+      resolvedPredictions: resolved.length,
+      pendingPredictions: pending.length,
+      targetHits: targetHits.length,
+      invalidations: invalidations.length,
+      expiredProfits: expiredProfits.length,
+      expiredLosses: expiredLosses.length,
+      winRatePercent: winRate,
+      targetHitRatePercent: targetHitRate,
+      profitFactor: profitFactor,
+      cumulativeReturnPercent: cumPnl
+    };
+
+    updateJournalStatsUI(statsObj);
+    updateJournalFilterCounts(activeDataset);
+    filterAndRenderJournalTable(activeDataset);
   }
 
   function updateJournalStatsUI(stats) {
@@ -1201,41 +1287,45 @@
     setTxt('j-count-bear', countBear);
   }
 
-  function filterAndRenderJournalTable() {
+  function filterAndRenderJournalTable(activeDataset) {
     const tbody = document.getElementById('history-table-body');
     if (!tbody) return;
 
-    let filtered = cachedJournalItems;
+    const dataset = activeDataset || getActiveFilteredDataset();
+    let filtered = dataset;
     switch (currentJournalFilter) {
       case 'tp':
-        filtered = cachedJournalItems.filter(i => i.outcomeStatus === 'TARGET_HIT');
+        filtered = dataset.filter(i => i.outcomeStatus === 'TARGET_HIT');
         break;
       case 'sl':
-        filtered = cachedJournalItems.filter(i => i.outcomeStatus === 'INVALIDATED');
+        filtered = dataset.filter(i => i.outcomeStatus === 'INVALIDATED');
         break;
       case 'expired':
-        filtered = cachedJournalItems.filter(i => i.outcomeStatus === 'EXPIRED_PROFIT' || i.outcomeStatus === 'EXPIRED_LOSS');
+        filtered = dataset.filter(i => i.outcomeStatus === 'EXPIRED_PROFIT' || i.outcomeStatus === 'EXPIRED_LOSS');
         break;
       case 'pending':
-        filtered = cachedJournalItems.filter(i => i.outcomeStatus === 'PENDING');
+        filtered = dataset.filter(i => i.outcomeStatus === 'PENDING');
         break;
       case 'bull':
-        filtered = cachedJournalItems.filter(i => i.signal === 'BULLISH_OPPORTUNITY');
+        filtered = dataset.filter(i => i.signal === 'BULLISH_OPPORTUNITY');
         break;
       case 'bear':
-        filtered = cachedJournalItems.filter(i => i.signal === 'BEARISH_RISK');
+        filtered = dataset.filter(i => i.signal === 'BEARISH_RISK');
         break;
       default:
-        filtered = cachedJournalItems;
+        filtered = dataset;
         break;
     }
 
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-dim);">Brak pozycji spełniających wybrany filtr (${currentJournalFilter}).</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-dim);">Brak pozycji spełniających wybrane kryteria (Próg ${Math.round(currentConvictionThreshold*100)}%, Filtr: ${currentJournalFilter}).</td></tr>`;
       return;
     }
 
-    tbody.innerHTML = filtered.map(item => {
+    // Sort descending by date
+    const sorted = [...filtered].sort((a, b) => (a.date < b.date ? 1 : -1));
+
+    tbody.innerHTML = sorted.map(item => {
       let badgeClass = 'neutral';
       let signalLabel = 'NEUTRAL';
       if (item.signal === 'BULLISH_OPPORTUNITY') {
@@ -1260,11 +1350,29 @@
         </div>
       `;
 
-      // Consensus summary
+      // Conviction Badge & Consensus summary
+      const prob = Number(item.bullishProbability || 0.5);
+      const convSpread = Math.abs(prob - 0.50) * 2;
+      let convBadgeHtml = '';
+      if (convSpread >= 0.40) {
+        convBadgeHtml = `<span class="conv-tag high" title="Wysoka siła przekonania (prob ${(prob*100).toFixed(0)}%)">🔥 ${(convSpread * 100).toFixed(0)}% Conv</span>`;
+      } else if (convSpread >= 0.20) {
+        convBadgeHtml = `<span class="conv-tag mid" title="Umiarkowana siła przekonania">⚡ ${(convSpread * 100).toFixed(0)}% Conv</span>`;
+      } else {
+        convBadgeHtml = `<span class="conv-tag low" title="Niska siła przekonania (szum)">⚠️ ${(convSpread * 100).toFixed(0)}% Conv</span>`;
+      }
+
       let consensusHtml = '<span style="color:var(--text-dim); font-size:0.75rem;">--</span>';
       if (item.consensusVerdict) {
         const agreeStr = item.consensusAgreementPercent ? ` (${Math.round(item.consensusAgreementPercent)}%)` : '';
-        consensusHtml = `<span style="font-family:var(--font-mono); font-size:0.72rem; color:#a5b4fc;">${escapeHtml(item.consensusVerdict)}${agreeStr}</span>`;
+        consensusHtml = `
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            ${convBadgeHtml}
+            <span style="font-family:var(--font-mono); font-size:0.72rem; color:#a5b4fc;">${escapeHtml(item.consensusVerdict)}${agreeStr}</span>
+          </div>
+        `;
+      } else {
+        consensusHtml = `<div>${convBadgeHtml}</div>`;
       }
 
       // Outcome Badge
@@ -1549,6 +1657,36 @@
         btn.classList.add('active');
         currentJournalFilter = btn.dataset.filter || 'all';
         filterAndRenderJournalTable();
+      });
+    });
+
+    // Priority 17: Conviction Threshold Buttons
+    document.querySelectorAll('.j-conv-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.j-conv-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentConvictionThreshold = parseFloat(btn.dataset.conv || '0.50');
+        recalculateAndRenderJournal();
+      });
+    });
+
+    // Priority 17: Execution Mode Toggle (Rolling vs Discrete)
+    document.querySelectorAll('.j-exec-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.j-exec-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentExecutionMode = btn.dataset.exec || 'rolling';
+        recalculateAndRenderJournal();
+      });
+    });
+
+    // Priority 17: Consensus Quality Toggle
+    document.querySelectorAll('.j-cons-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.j-cons-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentConsensusFilter = btn.dataset.cons || 'all';
+        recalculateAndRenderJournal();
       });
     });
   }
@@ -1960,6 +2098,31 @@
       if (consEl) {
         consEl.textContent = data.prediction.ensemble ? data.prediction.ensemble.consensusVerdict : 'Model Council';
       }
+
+      // Priority 17: Conviction Tag & Noise Warning
+      const tmProb = Number(data.prediction.bullishProbability || 0.5);
+      const tmConvSpread = Math.abs(tmProb - 0.50) * 2;
+      const convTagEl = document.getElementById('tm-banner-conviction');
+      const convWarnEl = document.getElementById('tm-conviction-warning');
+
+      if (convTagEl) {
+        convTagEl.style.display = 'inline-flex';
+        if (tmConvSpread >= 0.40) {
+          convTagEl.className = 'conv-tag high';
+          convTagEl.textContent = `🔥 ${(tmConvSpread * 100).toFixed(0)}% Conv`;
+        } else if (tmConvSpread >= 0.20) {
+          convTagEl.className = 'conv-tag mid';
+          convTagEl.textContent = `⚡ ${(tmConvSpread * 100).toFixed(0)}% Conv`;
+        } else {
+          convTagEl.className = 'conv-tag low';
+          convTagEl.textContent = `⚠️ ${(tmConvSpread * 100).toFixed(0)}% Conv (Szum)`;
+        }
+      }
+
+      if (convWarnEl) {
+        convWarnEl.style.display = tmConvSpread < 0.20 ? 'flex' : 'none';
+      }
+
       if (tpEl) tpEl.textContent = `🎯 TP: $${tp.toLocaleString()} (${(data.prediction.targetChangePercent * 100).toFixed(1)}%)`;
       if (slEl) slEl.textContent = `🛑 SL: $${sl.toLocaleString()} (${(data.prediction.invalidationChangePercent * 100).toFixed(1)}%)`;
       if (rrEl) rrEl.textContent = `R:R ${data.prediction.riskRewardRatio || 2.0}`;

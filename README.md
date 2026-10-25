@@ -180,6 +180,19 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
   - Edukacyjny baner wyjaśniający asymetrię zysku do ryzyka: przy $R:R = 2.0$, próg rentowności (break-even) wynosi 33.3%, a skuteczność 50–55% generuje wysoką rentowność (Profit Factor > 1.5).
 - [x] **Rozbudowana Tabela Transakcji:**
   - 8 kolumn ze statusem reżimu, celami TP/SL, zgodnością konsensusu, plakietkami rozstrzygnięcia, zrealizowanym PnL i datą wyjścia z pozycji.
+### Priorytet 17: Filtr Przekonania (Conviction Threshold), Tryby Egzekucji i Jakość Konsensusu ✅
+- [x] **Pasek Kontroli Jakości Sygnału (Conviction & Execution Controls Toolbar):**
+  - **Próg Siły Przekonania (Conviction Selector):** Wybór progu minimalnego prawdopodobieństwa modelu: `50% (Wszystkie)`, `≥ 60%`, `≥ 65% (Quant Benchmark)`, `≥ 70% (High Conviction)`, `≥ 75% (Extreme)`.
+  - **Przełącznik Trybu Egzekucji:**
+    - `📊 Ciągły (Każdy dzień / Rolling 7D)`: ciągła ewaluacja prognozy dla każdego dnia niezależnie.
+    - `🎯 Dyskretny (1 trade naraz)`: symulacja realnego portfela, w którym wejście w transakcję blokuje otwieranie kolejnych pozycji do momentu rozstrzygnięcia (eliminuje klastrowanie strat w konsolidacjach).
+  - **Filtr Jakości Konsensusu:** Przełącznik `Dowolny` vs `⭐ Tylko Silny Konsensus (Strong/Unanimous Consensus ≥ 60%)`.
+- [x] **Błyskawiczne Przeliczanie Metryk w Czasie Rzeczywistym (<5ms):**
+  - Natychmiastowa dynamiczna rekalkulacja wszystkich 5 kart KPI (**Win Rate**, **Target Hit Rate**, **Profit Factor**, **Cumulative PnL**, **Resolved / Pending**) oraz liczników pigułek po zmianie dowolnego parametru na suwaku/przełączniku.
+- [x] **Plakietki Siły Przekonania na Pozycjach:**
+  - Wskaźniki w tabeli dla każdej pozycji: `🔥 High Conviction (≥70%)`, `⚡ Mid Conviction (≥60%)`, `⚠️ Chop Risk (<60%)`.
+- [x] **Wskaźnik i Ostrzeżenie w Wehikule Czasu (Time-Machine):**
+  - Wyświetlanie siły przekonania oraz dynamicznego ostrzeżenia przed szumem konsolidacyjnym na wybranym dniu $T$ w module "Back to the Future".
 
 ---
 
