@@ -433,17 +433,17 @@ public class PredictorService : IPredictorService
 
         // --- 4 CARDINAL QUANT ALPHA ENGINE GATES ---
         // 1. Extreme Greed Euphoria Climax: Invert top FOMO into Reversal Short
-        bool isEuphoriaClimax = (todayMarket.FearGreedIndex >= 72 || 
-            (todayFeatures.BtcReturn7d > 0.10m && todayMarket.FearGreedIndex >= 65) || 
-            (todayFeatures.IsShortLiquiditySwept && todayFeatures.BtcReturn7d > 0.04m));
+        bool isEuphoriaClimax = todayMarket.FearGreedIndex >= 70 && 
+            (todayFeatures.BtcReturn7d > 0.08m || todayFeatures.IsShortLiquiditySwept || todayFeatures.FundingZScore30d > 1.6m) &&
+            todayFeatures.KaufmanEfficiencyRatio10d < 0.70m;
 
         // 2. Extreme Fear Capitulation: Invert panic dumping into Reversal Long
-        bool isCapitulationBottom = (todayMarket.FearGreedIndex <= 24 || 
-            todayFeatures.FundingZScore30d <= -1.2m || 
-            (todayFeatures.IsLongLiquiditySwept && todayFeatures.BtcReturn7d < -0.04m));
+        bool isCapitulationSpring = todayMarket.FearGreedIndex <= 25 && 
+            (todayFeatures.IsLongLiquiditySwept || todayFeatures.FundingZScore30d <= -1.4m) &&
+            todayFeatures.KaufmanEfficiencyRatio10d < 0.50m;
 
         // 3. Falling Knife: Strong bearish impulse without reversal confirmation
-        bool isFallingKnife = todayFeatures.BtcReturn7d < -0.08m && todayFeatures.KaufmanEfficiencyRatio10d > 0.60m && !todayFeatures.IsLongLiquiditySwept;
+        bool isFallingKnife = todayFeatures.BtcReturn7d < -0.06m && todayFeatures.KaufmanEfficiencyRatio10d > 0.50m && !todayFeatures.IsLongLiquiditySwept;
 
         // 4. Low Efficiency Chop: Sideways noise with low net displacement
         bool isChop = todayFeatures.KaufmanEfficiencyRatio10d < 0.28m && !todayFeatures.IsLongLiquiditySwept && !todayFeatures.IsShortLiquiditySwept;
@@ -451,32 +451,64 @@ public class PredictorService : IPredictorService
         if (isFallingKnife)
         {
             probability = 0.50f;
+            ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 100m };
             drivers.Insert(0, $"Falling Knife Gate: Severe downward impulse (KER: {todayFeatures.KaufmanEfficiencyRatio10d:F2}, 7d: {todayFeatures.BtcReturn7d:P1}) without Wyckoff Spring confirmation. Quant Engine mandates Cash Hold.");
         }
         else if (isEuphoriaClimax)
         {
-            probability = 0.28f; // Reversal short
+            probability = 0.22f; // Reversal short (78% conviction Bearish)
+            ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 75m };
             drivers.Insert(0, $"Euphoria Climax Reversal Gate: Extreme Greed (F&G: {todayMarket.FearGreedIndex}) / momentum extension (+{todayFeatures.BtcReturn7d:P1} 7d) warns of local distribution top. Model inverts FOMO continuation into tactical distribution short.");
         }
-        else if (isCapitulationBottom)
+        else if (isCapitulationSpring)
         {
-            probability = 0.76f; // Reversal long
+            probability = 0.78f; // Reversal long (78% conviction Bullish)
+            ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 75m };
             drivers.Insert(0, $"Capitulation Bottom Reversal Gate: Extreme Fear (F&G: {todayMarket.FearGreedIndex}) / negative funding (Z: {todayFeatures.FundingZScore30d:F2}) indicates peak short crowding. Model inverts panic into high-expectancy accumulation bounce.");
         }
         else if (isChop)
         {
             probability = 0.50f;
+            ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 100m };
             drivers.Insert(0, $"Consolidation Chop Gate: Kaufman Efficiency Ratio ({todayFeatures.KaufmanEfficiencyRatio10d:F2}) confirms choppy sideways range. Model mandates Neutral Cash Hold to eliminate whipsaw stop-outs.");
         }
-        else if (probability >= 0.65f && (todayMarket.FearGreedIndex >= 68 || todayFeatures.FundingZScore30d > 1.6m))
+        else if (probability >= 0.65f)
         {
-            probability = 0.50f;
-            drivers.Insert(0, $"Cardinal Rule of Greed: Bullish continuation suppressed due to elevated sentiment (F&G: {todayMarket.FearGreedIndex}) or crowded leverage funding (Z: {todayFeatures.FundingZScore30d:F2}).");
+            if (todayMarket.FearGreedIndex >= 68 || todayFeatures.FundingZScore30d > 1.6m)
+            {
+                probability = 0.50f;
+                ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 80m };
+                drivers.Insert(0, $"Cardinal Rule of Greed: Bullish continuation suppressed due to elevated sentiment (F&G: {todayMarket.FearGreedIndex}) or crowded leverage funding (Z: {todayFeatures.FundingZScore30d:F2}).");
+            }
+            else
+            {
+                // Synchronize consensus verdict with Bullish direction
+                if (bullVotes == 4)
+                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Unanimous Consensus", ConsensusAgreementPercent = 100m };
+                else if (bullVotes >= 3)
+                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 75m };
+                else
+                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Moderate Consensus", ConsensusAgreementPercent = 50m };
+            }
         }
-        else if (probability <= 0.35f && (todayMarket.FearGreedIndex <= 32 || todayFeatures.FundingZScore30d < -0.8m))
+        else if (probability <= 0.35f)
         {
-            probability = 0.50f;
-            drivers.Insert(0, $"Cardinal Rule of Fear: Bearish shorting suppressed due to terrified sentiment (F&G: {todayMarket.FearGreedIndex}) or negative funding squeeze risk (Z: {todayFeatures.FundingZScore30d:F2}).");
+            if (todayMarket.FearGreedIndex <= 32 || todayFeatures.FundingZScore30d < -0.8m)
+            {
+                probability = 0.50f;
+                ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 80m };
+                drivers.Insert(0, $"Cardinal Rule of Fear: Bearish shorting suppressed due to terrified sentiment (F&G: {todayMarket.FearGreedIndex}) or negative funding squeeze risk (Z: {todayFeatures.FundingZScore30d:F2}).");
+            }
+            else
+            {
+                // Synchronize consensus verdict with Bearish direction
+                if (bearVotes == 4)
+                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Unanimous Consensus", ConsensusAgreementPercent = 100m };
+                else if (bearVotes >= 3)
+                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Strong Consensus", ConsensusAgreementPercent = 75m };
+                else
+                    ensembleDetails = ensembleDetails with { ConsensusVerdict = "Moderate Consensus", ConsensusAgreementPercent = 50m };
+            }
         }
 
         string signal;
@@ -486,7 +518,7 @@ public class PredictorService : IPredictorService
         if (probability >= 0.65f)
         {
             signal = "BULLISH_OPPORTUNITY";
-            regime = isCapitulationBottom ? "Capitulation Spring / Accumulation" : "HighProbabilityBottom / Accumulation";
+            regime = isCapitulationSpring ? "Capitulation Spring / Accumulation" : "HighProbabilityBottom / Accumulation";
             confidence = probability >= 0.75f ? "High" : "Moderate";
         }
         else if (probability <= 0.35f)
