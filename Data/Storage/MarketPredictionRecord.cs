@@ -11,13 +11,13 @@ public class MarketPredictionRecord
     public string KeyDriversJson { get; set; } = "[]";
     public string? EnsembleJson { get; set; }
 
-    public decimal TargetPrice { get; set; }
-    public decimal InvalidationPrice { get; set; }
-    public decimal TargetChangePercent { get; set; }
-    public decimal InvalidationChangePercent { get; set; }
-    public decimal RiskRewardRatio { get; set; }
+    public decimal? TargetPrice { get; set; }
+    public decimal? InvalidationPrice { get; set; }
+    public decimal? TargetChangePercent { get; set; }
+    public decimal? InvalidationChangePercent { get; set; }
+    public decimal? RiskRewardRatio { get; set; }
 
-    public string OutcomeStatus { get; set; } = "PENDING"; // PENDING, TARGET_HIT, INVALIDATED, EXPIRED_PROFIT, EXPIRED_LOSS
+    public string? OutcomeStatus { get; set; } // PENDING, TARGET_HIT, INVALIDATED, EXPIRED_PROFIT, EXPIRED_LOSS
     public decimal? RealizedReturnPercent { get; set; }
     public DateOnly? ResolvedDate { get; set; }
     public decimal? ResolvedPrice { get; set; }

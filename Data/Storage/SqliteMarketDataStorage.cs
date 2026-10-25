@@ -84,6 +84,23 @@ public class SqliteMarketDataStorage : IMarketDataStorage
                 }
             }
 
+            // Backfill null values for legacy records
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(@"
+                    UPDATE ""MarketPredictions"" SET ""TargetPrice"" = '0' WHERE ""TargetPrice"" IS NULL;
+                    UPDATE ""MarketPredictions"" SET ""InvalidationPrice"" = '0' WHERE ""InvalidationPrice"" IS NULL;
+                    UPDATE ""MarketPredictions"" SET ""TargetChangePercent"" = '0' WHERE ""TargetChangePercent"" IS NULL;
+                    UPDATE ""MarketPredictions"" SET ""InvalidationChangePercent"" = '0' WHERE ""InvalidationChangePercent"" IS NULL;
+                    UPDATE ""MarketPredictions"" SET ""RiskRewardRatio"" = '2.0' WHERE ""RiskRewardRatio"" IS NULL;
+                    UPDATE ""MarketPredictions"" SET ""OutcomeStatus"" = 'PENDING' WHERE ""OutcomeStatus"" IS NULL;
+                ", ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to backfill default values for MarketPredictions nullable columns.");
+            }
+
             // Auto-migration from legacy JSON cache if SQLite table is empty
             if (!await db.MarketData.AnyAsync(ct))
             {
@@ -329,11 +346,11 @@ public class SqliteMarketDataStorage : IMarketDataStorage
         foreach (var pred in predictions)
         {
             // Ensure target and invalidation levels are present
-            decimal targetPrice = pred.TargetPrice;
-            decimal invalidationPrice = pred.InvalidationPrice;
-            decimal targetChangePct = pred.TargetChangePercent;
-            decimal invalidationChangePct = pred.InvalidationChangePercent;
-            decimal rrRatio = pred.RiskRewardRatio > 0 ? pred.RiskRewardRatio : 2.0m;
+            decimal targetPrice = pred.TargetPrice ?? 0m;
+            decimal invalidationPrice = pred.InvalidationPrice ?? 0m;
+            decimal targetChangePct = pred.TargetChangePercent ?? 0m;
+            decimal invalidationChangePct = pred.InvalidationChangePercent ?? 0m;
+            decimal rrRatio = (pred.RiskRewardRatio ?? 0m) > 0 ? pred.RiskRewardRatio!.Value : 2.0m;
 
             if (targetPrice <= 0 || invalidationPrice <= 0)
             {
@@ -608,11 +625,11 @@ public class SqliteMarketDataStorage : IMarketDataStorage
             Confidence = r.Confidence,
             KeyDrivers = drivers,
             Ensemble = ensemble,
-            TargetPrice = r.TargetPrice,
-            InvalidationPrice = r.InvalidationPrice,
-            TargetChangePercent = r.TargetChangePercent,
-            InvalidationChangePercent = r.InvalidationChangePercent,
-            RiskRewardRatio = r.RiskRewardRatio > 0 ? r.RiskRewardRatio : 2.0m,
+            TargetPrice = r.TargetPrice ?? 0m,
+            InvalidationPrice = r.InvalidationPrice ?? 0m,
+            TargetChangePercent = r.TargetChangePercent ?? 0m,
+            InvalidationChangePercent = r.InvalidationChangePercent ?? 0m,
+            RiskRewardRatio = (r.RiskRewardRatio ?? 0m) > 0 ? r.RiskRewardRatio!.Value : 2.0m,
             OutcomeStatus = string.IsNullOrWhiteSpace(r.OutcomeStatus) ? "PENDING" : r.OutcomeStatus,
             RealizedReturnPercent = r.RealizedReturnPercent,
             ResolvedDate = r.ResolvedDate,
