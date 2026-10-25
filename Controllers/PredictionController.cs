@@ -147,6 +147,49 @@ public class PredictionController : ControllerBase
     /// </summary>
     /// <param name="date">Historical date to evaluate.</param>
     /// <param name="strictlyOutOfSample">If true, trains a dedicated model strictly on data prior to this date, guaranteeing zero future leakage.</param>
+    /// <summary>
+    /// Returns available date boundaries and suggested presets for the Back to the Future Time-Machine visual backtester.
+    /// </summary>
+    [HttpGet("time-machine/range")]
+    public async Task<IActionResult> GetTimeMachineRange(CancellationToken ct = default)
+    {
+        var marketData = _storage.Exists()
+            ? await _storage.LoadAsync(ct)
+            : await _aggregator.FetchAndAggregateAsync(365, saveToStorage: true, ct);
+
+        if (marketData.Count == 0)
+            return StatusCode(500, "No market data available.");
+
+        var sortedMarket = marketData.OrderBy(d => d.Date).ToList();
+        // Date with at least 10 training samples with 7d lookahead
+        var minDate = sortedMarket.First().Date.AddDays(23);
+        // Ensure 7 forward candles exist
+        var maxDate = sortedMarket.Last().Date.AddDays(-7);
+
+        var presets = new[]
+        {
+            new { label = "📉 Dołek paniki ($83.5k)", date = "2026-09-28", description = "Lokalny dołek z dynamicznym odwróceniem w górę" },
+            new { label = "🚀 Euforyczny szczyt ($86.5k)", date = "2026-10-04", description = "Wykupienie rynku przed falą spadkową" },
+            new { label = "⚡ Odbicie z dołka ($81.7k)", date = "2026-10-08", description = "Wycięcie płynności i silny bounce" },
+            new { label = "🎯 Ostatni możliwy ($82.1k)", date = maxDate.ToString("yyyy-MM-dd"), description = "Ostatni dzień z kompletem 7 świec przyszłości" }
+        };
+
+        return Ok(new
+        {
+            MinDate = minDate.ToString("yyyy-MM-dd"),
+            MaxDate = maxDate.ToString("yyyy-MM-dd"),
+            DefaultDate = "2026-09-28",
+            TotalHistoricalDays = sortedMarket.Count,
+            Presets = presets
+        });
+    }
+
+    /// <summary>
+    /// Evaluates what the model would have predicted on a specific historical date (Point-in-Time Prediction)
+    /// and returns prior candles, forward 7 candles, the forecast cone, and the empirical resolution.
+    /// </summary>
+    /// <param name="date">Historical date to evaluate.</param>
+    /// <param name="strictlyOutOfSample">If true, trains a dedicated model strictly on data prior to this date, guaranteeing zero future leakage.</param>
     [HttpGet("historical")]
     public async Task<IActionResult> GetHistoricalDatePrediction(
         [FromQuery] DateOnly date,
@@ -205,13 +248,181 @@ public class PredictionController : ControllerBase
         var labels = _turningPointDetector.DetectTurningPoints(sortedMarket);
         var targetLabel = labels.FirstOrDefault(l => l.Date == date);
 
+        if (prediction.TargetPrice <= 0 || prediction.InvalidationPrice <= 0)
+        {
+            decimal targetPrice;
+            decimal invalidationPrice;
+            decimal targetChangePct;
+            decimal invalidationChangePct;
+
+            if (prediction.Signal == "BEARISH_RISK")
+            {
+                targetPrice = Math.Round(prediction.BtcClose * 0.92m, 2);
+                invalidationPrice = Math.Round(prediction.BtcClose * 1.04m, 2);
+                targetChangePct = -0.08m;
+                invalidationChangePct = 0.04m;
+            }
+            else
+            {
+                targetPrice = Math.Round(prediction.BtcClose * 1.08m, 2);
+                invalidationPrice = Math.Round(prediction.BtcClose * 0.96m, 2);
+                targetChangePct = 0.08m;
+                invalidationChangePct = -0.04m;
+            }
+
+            prediction = prediction with
+            {
+                TargetPrice = targetPrice,
+                InvalidationPrice = invalidationPrice,
+                TargetChangePercent = targetChangePct,
+                InvalidationChangePercent = invalidationChangePct,
+                RiskRewardRatio = 2.0m
+            };
+        }
+
+        // Prior candles up to and including 'date' (up to 60 candles)
+        var historicalCandles = sortedMarket
+            .Where(d => d.Date <= date)
+            .TakeLast(60)
+            .Select(d => new
+            {
+                time = d.Date.ToString("yyyy-MM-dd"),
+                open = d.BtcOpen,
+                high = d.BtcHigh,
+                low = d.BtcLow,
+                close = d.BtcClose,
+                volume = d.BtcVolume
+            })
+            .ToList();
+
+        // Forward 7 candles occurring after 'date'
+        var forwardMarket = sortedMarket
+            .Where(d => d.Date > date && d.Date <= date.AddDays(7))
+            .OrderBy(d => d.Date)
+            .ToList();
+
+        var forwardCandles = forwardMarket
+            .Select(d => new
+            {
+                time = d.Date.ToString("yyyy-MM-dd"),
+                open = d.BtcOpen,
+                high = d.BtcHigh,
+                low = d.BtcLow,
+                close = d.BtcClose,
+                volume = d.BtcVolume
+            })
+            .ToList();
+
+        // Resolution evaluation
+        string outcome = "PENDING";
+        decimal? realizedReturn = null;
+        int? hitDayIndex = null;
+        DateOnly? resolvedDate = null;
+        decimal? resolvedPrice = null;
+
+        if (prediction.Signal == "BULLISH_OPPORTUNITY")
+        {
+            for (int i = 0; i < forwardMarket.Count; i++)
+            {
+                var c = forwardMarket[i];
+                if (c.BtcHigh >= prediction.TargetPrice)
+                {
+                    outcome = "TARGET_HIT";
+                    realizedReturn = Math.Abs(prediction.TargetChangePercent);
+                    hitDayIndex = i;
+                    resolvedDate = c.Date;
+                    resolvedPrice = prediction.TargetPrice;
+                    break;
+                }
+                if (c.BtcLow <= prediction.InvalidationPrice)
+                {
+                    outcome = "INVALIDATED";
+                    realizedReturn = -Math.Abs(prediction.InvalidationChangePercent);
+                    hitDayIndex = i;
+                    resolvedDate = c.Date;
+                    resolvedPrice = prediction.InvalidationPrice;
+                    break;
+                }
+            }
+
+            if (outcome == "PENDING" && forwardMarket.Count > 0)
+            {
+                var lastC = forwardMarket.Last();
+                decimal ret = (lastC.BtcClose - targetMarket.BtcClose) / targetMarket.BtcClose;
+                outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
+                realizedReturn = Math.Round(ret, 4);
+                resolvedDate = lastC.Date;
+                resolvedPrice = lastC.BtcClose;
+                hitDayIndex = forwardMarket.Count - 1;
+            }
+        }
+        else if (prediction.Signal == "BEARISH_RISK")
+        {
+            for (int i = 0; i < forwardMarket.Count; i++)
+            {
+                var c = forwardMarket[i];
+                if (c.BtcLow <= prediction.TargetPrice)
+                {
+                    outcome = "TARGET_HIT";
+                    realizedReturn = Math.Abs(prediction.TargetChangePercent);
+                    hitDayIndex = i;
+                    resolvedDate = c.Date;
+                    resolvedPrice = prediction.TargetPrice;
+                    break;
+                }
+                if (c.BtcHigh >= prediction.InvalidationPrice)
+                {
+                    outcome = "INVALIDATED";
+                    realizedReturn = -Math.Abs(prediction.InvalidationChangePercent);
+                    hitDayIndex = i;
+                    resolvedDate = c.Date;
+                    resolvedPrice = prediction.InvalidationPrice;
+                    break;
+                }
+            }
+
+            if (outcome == "PENDING" && forwardMarket.Count > 0)
+            {
+                var lastC = forwardMarket.Last();
+                decimal ret = (targetMarket.BtcClose - lastC.BtcClose) / targetMarket.BtcClose;
+                outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
+                realizedReturn = Math.Round(ret, 4);
+                resolvedDate = lastC.Date;
+                resolvedPrice = lastC.BtcClose;
+                hitDayIndex = forwardMarket.Count - 1;
+            }
+        }
+        else
+        {
+            if (forwardMarket.Count > 0)
+            {
+                var lastC = forwardMarket.Last();
+                decimal ret = (lastC.BtcClose - targetMarket.BtcClose) / targetMarket.BtcClose;
+                outcome = Math.Abs(ret) <= 0.03m ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
+                realizedReturn = Math.Round(ret, 4);
+                resolvedDate = lastC.Date;
+                resolvedPrice = lastC.BtcClose;
+                hitDayIndex = forwardMarket.Count - 1;
+            }
+        }
+
         return Ok(new
         {
             Date = date,
             BtcClose = targetMarket.BtcClose,
             StrictlyOutOfSample = strictlyOutOfSample,
             TrainingSamplesUsed = trainingSamplesUsed,
+            HistoricalCandles = historicalCandles,
+            ForwardCandles = forwardCandles,
             Prediction = prediction,
+            Resolution = new
+            {
+                OutcomeStatus = outcome,
+                RealizedReturnPercent = realizedReturn,
+                HitDayIndex = hitDayIndex,
+                ResolvedDate = resolvedDate,
+                ResolvedPrice = resolvedPrice
+            },
             ActualHistoricalOutcome = new
             {
                 ForwardReturn3d = targetLabel?.ForwardReturn3d,

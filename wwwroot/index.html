@@ -42,6 +42,11 @@
           Telegram Alert
         </button>
 
+        <a href="#time-machine-section" class="btn btn-secondary tm-header-btn" title="Skocz do wizualnego wehikułu czasu (Time-Machine Visual Backtest)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Back to the Future
+        </a>
+
         <a href="/swagger" target="_blank" class="btn btn-ghost" title="Open API Swagger UI documentation">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
           API Swagger
@@ -356,6 +361,143 @@
       </div>
     </section>
 
+    <!-- Back to the Future (Time-Machine Visual Backtest) Section -->
+    <section id="time-machine-section" class="time-machine-section card">
+      <div class="tm-header">
+        <div class="tm-title-group">
+          <div class="tm-title">
+            <span class="tm-icon">⚡</span>
+            <span>Back to the Future</span>
+            <span class="tm-badge">Visual Point-in-Time Backtest</span>
+          </div>
+          <div class="tm-subtitle">
+            Cofnij się do dowolnego dnia w historii. Silnik AI wygeneruje predykcję na 7 dni do przodu na podstawie danych dostępnych <strong>wyłącznie do wybranego momentu</strong> (zero lookahead leakage). Następnie kliknij <strong>▶ Odtwórz 7 dni</strong>, by odsłonić rzeczywisty bieg rynku i zweryfikować trafność modelu.
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls & Presets Bar -->
+      <div class="tm-controls-bar">
+        <div class="tm-date-picker-group">
+          <label for="tm-date-input" class="tm-control-label">WYBIERZ DATĘ SYMULACJI (Dzień T):</label>
+          <div class="tm-input-wrapper">
+            <input type="date" id="tm-date-input" class="tm-date-input" min="2026-04-14" max="2026-10-18" value="2026-09-28">
+            <button id="btn-tm-travel" class="btn btn-primary tm-btn-action" title="Załaduj dane i wykonaj czystą predykcję Out-of-Sample dla wybranego dnia">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Załaduj Dzień T
+            </button>
+          </div>
+        </div>
+
+        <div class="tm-presets-group">
+          <span class="tm-control-label">SZYBKIE PRESETY (CIEKAWE MOMENTY):</span>
+          <div id="tm-presets-container" class="tm-presets-list">
+            <button class="tm-preset-btn" data-date="2026-09-28">📉 Dołek $83.5k (28.09)</button>
+            <button class="tm-preset-btn" data-date="2026-10-04">🚀 Szczyt $86.5k (04.10)</button>
+            <button class="tm-preset-btn" data-date="2026-10-08">⚡ Bounce $81.7k (08.10)</button>
+            <button class="tm-preset-btn" data-date="2026-08-01">🌊 Letnia panika $62.8k (01.08)</button>
+            <button id="btn-tm-random" class="tm-preset-btn random-btn">🎲 Losowy dzień</button>
+          </div>
+        </div>
+
+        <div class="tm-playback-group">
+          <span class="tm-control-label">SYMULACJA PRZYSZŁOŚCI:</span>
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+            <button id="btn-tm-play" class="btn btn-accent tm-btn-play" disabled title="Odsłoń świeca po świecy kolejne 7 dni rzeczywistego rynku">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              ▶ Odtwórz 7 dni
+            </button>
+            <button id="btn-tm-reset" class="btn btn-secondary tm-btn-reset" disabled title="Wróć do stanu pierwotnego z dnia T">
+              ↺ Reset
+            </button>
+            <div class="tm-speed-selector">
+              <button class="tm-speed-btn active" data-speed="600">1x</button>
+              <button class="tm-speed-btn" data-speed="250">2x</button>
+              <button class="tm-speed-btn" data-speed="0">⚡ Błyskawicznie</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Point-in-Time Prediction Snapshot Banner -->
+      <div id="tm-prediction-banner" class="tm-prediction-banner" style="display: none;">
+        <div class="tm-pred-col">
+          <div class="tm-pred-meta">STAN MODELU NA DZIEŃ <span id="tm-banner-date">--</span>:</div>
+          <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 0.25rem;">
+            <span id="tm-banner-signal" class="signal-badge neutral">--</span>
+            <span id="tm-banner-regime" class="regime-pill">--</span>
+          </div>
+        </div>
+
+        <div class="tm-pred-col">
+          <div class="tm-pred-meta">ENSEMBLE BULLISH PROBABILITY:</div>
+          <div style="display: flex; gap: 0.6rem; align-items: baseline; margin-top: 0.25rem;">
+            <span id="tm-banner-prob" class="tm-banner-prob-val">--%</span>
+            <span id="tm-banner-consensus" class="consensus-tag">--</span>
+          </div>
+        </div>
+
+        <div class="tm-pred-col">
+          <div class="tm-pred-meta">WYZNACZONE CELE 7D:</div>
+          <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.25rem; flex-wrap: wrap;">
+            <span id="tm-banner-tp" class="target-pill">🎯 TP: $--</span>
+            <span id="tm-banner-sl" class="invalidation-pill">🛑 SL: $--</span>
+            <span id="tm-banner-rr" class="rr-pill">R:R 2.0</span>
+          </div>
+        </div>
+
+        <div class="tm-pred-col tm-progress-col">
+          <div class="tm-pred-meta">STATUS ODKRYWANIA PRZYSZŁOŚCI:</div>
+          <div id="tm-playback-status" class="tm-playback-status">Oczekiwanie na kliknięcie ▶ Odtwórz</div>
+        </div>
+      </div>
+
+      <!-- Time Machine Chart Canvas -->
+      <div class="tm-chart-wrapper">
+        <div id="time-machine-chart" class="time-machine-chart"></div>
+
+        <!-- Floating Outcome Verdict Modal / Overlay -->
+        <div id="tm-outcome-card" class="tm-outcome-card" style="display: none;">
+          <div class="tm-outcome-header">
+            <span id="tm-outcome-badge" class="outcome-badge">--</span>
+            <span id="tm-outcome-title" class="tm-outcome-title">Wynik Weryfikacji 7D</span>
+          </div>
+          <div id="tm-outcome-message" class="tm-outcome-message">--</div>
+          <div class="tm-outcome-grid">
+            <div class="tm-outcome-stat">
+              <span class="tm-stat-k">Realized PnL:</span>
+              <span id="tm-res-pnl" class="tm-stat-v">--%</span>
+            </div>
+            <div class="tm-outcome-stat">
+              <span class="tm-stat-k">Rzeczywisty zwrot BTC (7d):</span>
+              <span id="tm-res-btc7d" class="tm-stat-v">--%</span>
+            </div>
+            <div class="tm-outcome-stat">
+              <span class="tm-stat-k">Moment rozstrzygnięcia:</span>
+              <span id="tm-res-hitday" class="tm-stat-v">Dzień --/7</span>
+            </div>
+            <div class="tm-outcome-stat">
+              <span class="tm-stat-k">Trafność sygnału:</span>
+              <span id="tm-res-verdict" class="tm-stat-v">--</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 0.5rem; margin-top: 0.85rem; justify-content: flex-end;">
+            <button id="btn-tm-close-outcome" class="btn btn-secondary btn-sm">Zamknij podsumowanie</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Model Council Point-in-Time Vote Breakdown -->
+      <div id="tm-council-section" class="tm-council-section" style="display: none;">
+        <div class="panel-heading" style="margin-bottom: 0.5rem;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>Głosowanie Rady Modeli w wybranym dniu (Point-in-Time)</span>
+        </div>
+        <div id="tm-votes-grid" class="tm-votes-grid"></div>
+        <div id="tm-drivers-box" class="tm-drivers-box"></div>
+      </div>
+    </section>
+
     <!-- Live Prediction Journal & Accuracy Tracker Table -->
     <section class="history-section">
       <div class="card table-card">
@@ -424,6 +566,6 @@
 
   <!-- Scripts -->
   <script src="/js/lightweight-charts.standalone.production.js"></script>
-  <script src="/js/app.js?v=1.4"></script>
+  <script src="/js/app.js?v=1.5"></script>
 </body>
 </html>

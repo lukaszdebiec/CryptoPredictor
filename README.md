@@ -154,6 +154,20 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] **Nowoczesny Interfejs Tabeli Journala:**
   - Przebudowa tabeli na 7 kolumn: `Data`, `BTC Close`, `Sygnał`, `Targety (TP / SL)`, `Konsensus`, `Wynik 7D`, `Zrealizowany PnL` z kolorowymi plakietkami (`🎯 TP HIT`, `🛑 SL HIT`, `⏱️ EXPIRED`, `⏳ PENDING`).
 
+### Priorytet 15: "Back to the Future" – Wizualny Wehikuł Czasu i Point-in-Time Backtest ✅
+- [x] **Ścisła Symulacja Point-in-Time (Strictly Out-of-Sample):**
+  - Użytkownik wybiera dowolną datę historyczną $T$ z dostępnego okna (kwiecień – październik 2026).
+  - Backend (`GET /api/prediction/historical`) izoluje zbiór danych wyłącznie do daty $T$ (z 7-dniowym buforem antywyciekowym) i od zera trenuje Radę Modeli (FastTree GBDT, FastForest, SDCA, Heurystyki).
+- [x] **Czysty Wykres i 7-Dniowy Stożek Prognozy:**
+  - Wykres Lightweight Charts renderuje świece wyłącznie do dnia $T$, po czym rozpościera w pustą przestrzeń 7-dniowy stożek zmienności (`projectionCone`) oraz poziomy docelowe Take-Profit (+8%) i Stop-Loss (-4%).
+- [x] **Animacja "▶ Play (Odtwórz 7 dni przyszłości)":**
+  - Przycisk odtwarzania dorysowuje świeca po świecy kolejne 7 dni rzeczywistego rynku (z regulowaną prędkością 1x, 2x, natychmiast).
+  - Dynamiczny monitoring: sprawdzenie w locie, czy cena osiągnęła TP, SL czy wygasła po 7 dniach.
+- [x] **Karta Werdyktu Końcowego (Outcome Verdict Overlay):**
+  - Podsumowanie zrealizowanego PnL, rzeczywistej 7-dniowej stopy zwrotu Bitcoina, dnia rozstrzygnięcia oraz oceny trafności kierunkowej modelu.
+- [x] **Szybkie Presety i Losowy Dzień:**
+  - Zdefiniowane presety kluczowych punktów zwrotnych (dołek paniki $83.5k, szczyt euforyczny $86.5k, bounce $81.7k) oraz generator losowego dnia (`🎲 Losowy dzień`).
+
 ---
 
 

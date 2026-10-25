@@ -45,6 +45,20 @@
   let currentMainHeight = parseInt(localStorage.getItem('cp_main_chart_height') || '560', 10);
   let currentSubHeight = parseInt(localStorage.getItem('cp_sub_chart_height') || '220', 10);
 
+  // Priority 15: Time Machine (Back to the Future) State
+  let tmChart = null;
+  let tmCandleSeries = null;
+  let tmUpperConeSeries = null;
+  let tmLowerConeSeries = null;
+  let tmExpectedLineSeries = null;
+  let tmTpLine = null;
+  let tmSlLine = null;
+  let currentTimeMachineData = null;
+  let tmPlaybackInterval = null;
+  let tmPlaybackSpeed = 600;
+  let tmMinDate = '2026-04-14';
+  let tmMaxDate = '2026-10-18';
+
   // Color constants
   const COLORS = {
     bg: '#070a13',
@@ -1523,6 +1537,546 @@
     }
   }
 
+  // ==========================================================================
+  // Priority 15: Back to the Future (Time-Machine Visual Backtest)
+  // ==========================================================================
+
+  function initTimeMachineChart() {
+    if (tmChart) return tmChart;
+    const container = document.getElementById('time-machine-chart');
+    if (!container || !window.LightweightCharts) return null;
+
+    tmChart = window.LightweightCharts.createChart(container, {
+      width: container.clientWidth || 800,
+      height: 440,
+      layout: {
+        background: { type: 'solid', color: '#090e1a' },
+        textColor: '#94a3b8',
+        fontSize: 11,
+        fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+      },
+      grid: {
+        vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
+        horzLines: { color: 'rgba(255, 255, 255, 0.03)' }
+      },
+      crosshair: {
+        mode: 1
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(255, 255, 255, 0.08)',
+        scaleMargins: { top: 0.1, bottom: 0.1 }
+      },
+      timeScale: {
+        borderColor: 'rgba(255, 255, 255, 0.08)',
+        timeVisible: true
+      }
+    });
+
+    tmCandleSeries = tmChart.addCandlestickSeries({
+      upColor: '#10b981',
+      downColor: '#f43f5e',
+      borderVisible: false,
+      wickUpColor: '#10b981',
+      wickDownColor: '#f43f5e'
+    });
+
+    tmUpperConeSeries = tmChart.addLineSeries({
+      color: 'rgba(56, 189, 248, 0.7)',
+      lineWidth: 1,
+      lineStyle: 2,
+      priceLineVisible: false,
+      title: 'Upper Band (+1σ)'
+    });
+
+    tmLowerConeSeries = tmChart.addLineSeries({
+      color: 'rgba(56, 189, 248, 0.7)',
+      lineWidth: 1,
+      lineStyle: 2,
+      priceLineVisible: false,
+      title: 'Lower Band (-1σ)'
+    });
+
+    tmExpectedLineSeries = tmChart.addLineSeries({
+      color: '#f59e0b',
+      lineWidth: 2,
+      lineStyle: 0,
+      priceLineVisible: false,
+      title: 'Expected Path'
+    });
+
+    // Responsive resize
+    const resizeObserver = new ResizeObserver(entries => {
+      if (!entries || !entries[0] || !tmChart) return;
+      const { width } = entries[0].contentRect;
+      if (width > 0) {
+        tmChart.resize(width, 440);
+      }
+    });
+    resizeObserver.observe(container);
+
+    return tmChart;
+  }
+
+  async function initTimeMachine() {
+    const dateInput = document.getElementById('tm-date-input');
+    const btnTravel = document.getElementById('btn-tm-travel');
+    const btnPlay = document.getElementById('btn-tm-play');
+    const btnReset = document.getElementById('btn-tm-reset');
+    const btnRandom = document.getElementById('btn-tm-random');
+    const btnCloseOutcome = document.getElementById('btn-tm-close-outcome');
+
+    try {
+      const resp = await fetch('/api/prediction/time-machine/range');
+      if (resp.ok) {
+        const range = await resp.json();
+        if (range.minDate && range.maxDate) {
+          tmMinDate = range.minDate;
+          tmMaxDate = range.maxDate;
+          if (dateInput) {
+            dateInput.min = tmMinDate;
+            dateInput.max = tmMaxDate;
+            dateInput.value = range.defaultDate || '2026-09-28';
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch time-machine range:', e);
+    }
+
+    // Presets
+    document.querySelectorAll('.tm-preset-btn[data-date]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const d = btn.getAttribute('data-date');
+        if (d && dateInput) {
+          dateInput.value = d;
+          loadTimeMachineSimulation(d);
+        }
+      });
+    });
+
+    // Random day button
+    if (btnRandom && dateInput) {
+      btnRandom.addEventListener('click', () => {
+        const minT = new Date(tmMinDate).getTime();
+        const maxT = new Date(tmMaxDate).getTime();
+        const randT = minT + Math.random() * (maxT - minT);
+        const randDate = new Date(randT).toISOString().split('T')[0];
+        dateInput.value = randDate;
+        loadTimeMachineSimulation(randDate);
+      });
+    }
+
+    if (btnTravel && dateInput) {
+      btnTravel.addEventListener('click', () => {
+        if (dateInput.value) {
+          loadTimeMachineSimulation(dateInput.value);
+        }
+      });
+    }
+
+    if (btnPlay) {
+      btnPlay.addEventListener('click', () => {
+        playTimeMachineFuture();
+      });
+    }
+
+    if (btnReset) {
+      btnReset.addEventListener('click', () => {
+        resetTimeMachine();
+      });
+    }
+
+    if (btnCloseOutcome) {
+      btnCloseOutcome.addEventListener('click', () => {
+        const card = document.getElementById('tm-outcome-card');
+        if (card) card.style.display = 'none';
+      });
+    }
+
+    // Speed selector
+    document.querySelectorAll('.tm-speed-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tm-speed-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        tmPlaybackSpeed = parseInt(btn.getAttribute('data-speed') || '600', 10);
+      });
+    });
+
+    // Auto-load initial simulation on boot
+    const initialDate = (dateInput && dateInput.value) ? dateInput.value : '2026-09-28';
+    loadTimeMachineSimulation(initialDate);
+  }
+
+  async function loadTimeMachineSimulation(dateStr) {
+    const btnTravel = document.getElementById('btn-tm-travel');
+    const btnPlay = document.getElementById('btn-tm-play');
+    const btnReset = document.getElementById('btn-tm-reset');
+    const outcomeCard = document.getElementById('tm-outcome-card');
+    const banner = document.getElementById('tm-prediction-banner');
+    const councilSec = document.getElementById('tm-council-section');
+    const statusText = document.getElementById('tm-playback-status');
+
+    if (tmPlaybackInterval) {
+      clearInterval(tmPlaybackInterval);
+      tmPlaybackInterval = null;
+    }
+
+    if (btnTravel) {
+      btnTravel.disabled = true;
+      btnTravel.innerHTML = '⏳ Cofam w czasie...';
+    }
+    if (btnPlay) btnPlay.disabled = true;
+    if (btnReset) btnReset.disabled = true;
+    if (outcomeCard) outcomeCard.style.display = 'none';
+    if (statusText) statusText.textContent = 'Trenowanie modeli Out-of-Sample dla wybranego dnia...';
+
+    try {
+      const resp = await fetch(`/api/prediction/historical?date=${dateStr}&strictlyOutOfSample=true`);
+      if (!resp.ok) {
+        const errText = await resp.text();
+        showToast(`Nie udało się cofnąć w czasie: ${errText}`, 'error');
+        if (statusText) statusText.textContent = `Błąd: ${errText}`;
+        return;
+      }
+
+      const data = await resp.json();
+      currentTimeMachineData = data;
+
+      initTimeMachineChart();
+
+      // Clear previous price lines
+      if (tmTpLine && tmCandleSeries) {
+        tmCandleSeries.removePriceLine(tmTpLine);
+        tmTpLine = null;
+      }
+      if (tmSlLine && tmCandleSeries) {
+        tmCandleSeries.removePriceLine(tmSlLine);
+        tmSlLine = null;
+      }
+
+      // Populate historical candles up to date T
+      const histData = (data.historicalCandles || []).map(c => ({
+        time: parseChartTime(c.time),
+        open: Number(c.open),
+        high: Number(c.high),
+        low: Number(c.low),
+        close: Number(c.close)
+      }));
+
+      tmCandleSeries.setData(histData);
+
+      // Populate 7D Forecast Cone starting at date T
+      if (data.prediction && data.prediction.projectionCone && data.prediction.projectionCone.length > 0) {
+        const upper = data.prediction.projectionCone.map(p => ({
+          time: parseChartTime(p.time),
+          value: Number(p.upperBand)
+        }));
+        const lower = data.prediction.projectionCone.map(p => ({
+          time: parseChartTime(p.time),
+          value: Number(p.lowerBand)
+        }));
+        const exp = data.prediction.projectionCone.map(p => ({
+          time: parseChartTime(p.time),
+          value: Number(p.expectedPrice)
+        }));
+
+        tmUpperConeSeries.setData(upper);
+        tmLowerConeSeries.setData(lower);
+        tmExpectedLineSeries.setData(exp);
+      } else {
+        tmUpperConeSeries.setData([]);
+        tmLowerConeSeries.setData([]);
+        tmExpectedLineSeries.setData([]);
+      }
+
+      // Draw TP and SL price lines
+      const tp = Number(data.prediction.targetPrice);
+      const sl = Number(data.prediction.invalidationPrice);
+      if (tp > 0) {
+        tmTpLine = tmCandleSeries.createPriceLine({
+          price: tp,
+          color: '#10b981',
+          lineWidth: 2,
+          lineStyle: 1,
+          axisLabelVisible: true,
+          title: `🎯 TP: $${tp.toLocaleString()}`
+        });
+      }
+      if (sl > 0) {
+        tmSlLine = tmCandleSeries.createPriceLine({
+          price: sl,
+          color: '#f43f5e',
+          lineWidth: 2,
+          lineStyle: 1,
+          axisLabelVisible: true,
+          title: `🛑 SL: $${sl.toLocaleString()}`
+        });
+      }
+
+      tmChart.timeScale().fitContent();
+
+      // Update banner
+      const dateEl = document.getElementById('tm-banner-date');
+      const sigEl = document.getElementById('tm-banner-signal');
+      const regEl = document.getElementById('tm-banner-regime');
+      const probEl = document.getElementById('tm-banner-prob');
+      const consEl = document.getElementById('tm-banner-consensus');
+      const tpEl = document.getElementById('tm-banner-tp');
+      const slEl = document.getElementById('tm-banner-sl');
+      const rrEl = document.getElementById('tm-banner-rr');
+
+      if (dateEl) dateEl.textContent = data.date;
+      if (sigEl) {
+        sigEl.textContent = data.prediction.signal.replace(/_/g, ' ');
+        sigEl.className = 'signal-badge ' + (data.prediction.signal === 'BULLISH_OPPORTUNITY' ? 'bullish' : data.prediction.signal === 'BEARISH_RISK' ? 'bearish' : 'neutral');
+      }
+      if (regEl) regEl.textContent = data.prediction.marketRegime || 'Consolidation';
+      if (probEl) probEl.textContent = `${(data.prediction.bullishProbability * 100).toFixed(1)}%`;
+      if (consEl) {
+        consEl.textContent = data.prediction.ensemble ? data.prediction.ensemble.consensusVerdict : 'Model Council';
+      }
+      if (tpEl) tpEl.textContent = `🎯 TP: $${tp.toLocaleString()} (${(data.prediction.targetChangePercent * 100).toFixed(1)}%)`;
+      if (slEl) slEl.textContent = `🛑 SL: $${sl.toLocaleString()} (${(data.prediction.invalidationChangePercent * 100).toFixed(1)}%)`;
+      if (rrEl) rrEl.textContent = `R:R ${data.prediction.riskRewardRatio || 2.0}`;
+
+      const fCount = data.forwardCandles ? data.forwardCandles.length : 0;
+      if (statusText) statusText.textContent = `Gotowy do odtworzenia. Czeka ${fCount} świec przyszłości.`;
+
+      if (banner) banner.style.display = 'grid';
+
+      // Render Model Council Votes
+      renderTimeMachineVotes(data.prediction.ensemble, data.prediction.keyDrivers);
+      if (councilSec) councilSec.style.display = 'block';
+
+      if (btnPlay) btnPlay.disabled = fCount === 0;
+      if (btnReset) btnReset.disabled = false;
+
+      showToast(`Przeniesiono do dnia ${dateStr}! Predykcja gotowa.`, 'success');
+    } catch (err) {
+      console.error('Error loading time machine simulation:', err);
+      showToast('Wystąpił błąd podczas ładowania symulacji.', 'error');
+    } finally {
+      if (btnTravel) {
+        btnTravel.disabled = false;
+        btnTravel.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Załaduj Dzień T';
+      }
+    }
+  }
+
+  function renderTimeMachineVotes(ensemble, drivers) {
+    const votesContainer = document.getElementById('tm-votes-grid');
+    const driversContainer = document.getElementById('tm-drivers-box');
+
+    if (votesContainer) {
+      if (!ensemble || !ensemble.votes || ensemble.votes.length === 0) {
+        votesContainer.innerHTML = '<div style="color: var(--text-dim); font-size: 0.78rem;">Pojedynczy model heurystyczny (brak wag rady).</div>';
+      } else {
+        votesContainer.innerHTML = ensemble.votes.map(v => {
+          const prob = (v.probability * 100).toFixed(0);
+          const weight = (v.weight * 100).toFixed(0);
+          const sigClass = v.signal === 'BULLISH' ? 'text-bullish' : v.signal === 'BEARISH' ? 'text-bearish' : '';
+          return `
+            <div class="tm-vote-card">
+              <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                <strong style="color: var(--text-main); font-size: 0.78rem;">${escapeHtml(v.modelName)}</strong>
+                <span class="${sigClass}" style="font-weight: 700; font-size: 0.72rem; font-family: var(--font-mono);">${v.signal}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 0.70rem; color: var(--text-dim); margin-top: 0.2rem;">
+                <span>Bullish Prob: <strong style="color: var(--text-main);">${prob}%</strong></span>
+                <span>Waga: <strong style="color: #c084fc;">${weight}%</strong></span>
+              </div>
+              <div class="ens-bar-track" style="margin-top: 0.35rem;">
+                <div class="ens-bar-fill" style="width: ${prob}%; background: ${v.signal === 'BULLISH' ? '#10b981' : v.signal === 'BEARISH' ? '#f43f5e' : '#3b82f6'};"></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    if (driversContainer) {
+      if (!drivers || drivers.length === 0) {
+        driversContainer.textContent = 'Brak specyficznych czynników rynkowych w tym dniu.';
+      } else {
+        driversContainer.innerHTML = '<strong>Kluczowe czynniki w dniu symulacji:</strong><ul style="margin: 0.4rem 0 0 1.2rem; padding: 0;">' +
+          drivers.map(d => `<li style="margin-bottom: 0.25rem;">${escapeHtml(d)}</li>`).join('') +
+          '</ul>';
+      }
+    }
+  }
+
+  function playTimeMachineFuture() {
+    if (!currentTimeMachineData || !currentTimeMachineData.forwardCandles) return;
+    const forward = currentTimeMachineData.forwardCandles;
+    if (forward.length === 0) return;
+
+    const btnPlay = document.getElementById('btn-tm-play');
+    const statusText = document.getElementById('tm-playback-status');
+    const outcomeCard = document.getElementById('tm-outcome-card');
+
+    if (btnPlay) btnPlay.disabled = true;
+    if (outcomeCard) outcomeCard.style.display = 'none';
+
+    if (tmPlaybackSpeed === 0) {
+      // Instant reveal
+      forward.forEach(c => {
+        tmCandleSeries.update({
+          time: parseChartTime(c.time),
+          open: Number(c.open),
+          high: Number(c.high),
+          low: Number(c.low),
+          close: Number(c.close)
+        });
+      });
+      if (statusText) statusText.textContent = `Odsłonięto błyskawicznie wszystkie ${forward.length} dni przyszłości!`;
+      showTimeMachineOutcome();
+      if (btnPlay) btnPlay.disabled = false;
+      return;
+    }
+
+    let idx = 0;
+    if (statusText) statusText.textContent = `Odkrywanie przyszłości: dzień 1/${forward.length}...`;
+
+    if (tmPlaybackInterval) clearInterval(tmPlaybackInterval);
+
+    tmPlaybackInterval = setInterval(() => {
+      if (idx < forward.length) {
+        const c = forward[idx];
+        tmCandleSeries.update({
+          time: parseChartTime(c.time),
+          open: Number(c.open),
+          high: Number(c.high),
+          low: Number(c.low),
+          close: Number(c.close)
+        });
+        if (statusText) {
+          statusText.textContent = `Odkryto dzień ${idx + 1}/${forward.length} (${c.time}) • Close: $${Number(c.close).toLocaleString()}`;
+        }
+        idx++;
+      } else {
+        clearInterval(tmPlaybackInterval);
+        tmPlaybackInterval = null;
+        if (statusText) statusText.textContent = `Odsłonięto komplet ${forward.length} dni przyszłości.`;
+        showTimeMachineOutcome();
+        if (btnPlay) btnPlay.disabled = false;
+      }
+    }, tmPlaybackSpeed);
+  }
+
+  function showTimeMachineOutcome() {
+    if (!currentTimeMachineData) return;
+    const data = currentTimeMachineData;
+    const res = data.resolution || {};
+    const outcome = res.outcomeStatus || 'PENDING';
+    const retPct = res.realizedReturnPercent != null ? (res.realizedReturnPercent * 100).toFixed(1) : '--';
+    const hitDay = res.hitDayIndex != null ? res.hitDayIndex + 1 : 7;
+
+    const outcomeCard = document.getElementById('tm-outcome-card');
+    const badgeEl = document.getElementById('tm-outcome-badge');
+    const titleEl = document.getElementById('tm-outcome-title');
+    const msgEl = document.getElementById('tm-outcome-message');
+    const pnlEl = document.getElementById('tm-res-pnl');
+    const btc7dEl = document.getElementById('tm-res-btc7d');
+    const hitdayEl = document.getElementById('tm-res-hitday');
+    const verdictEl = document.getElementById('tm-res-verdict');
+
+    if (!outcomeCard) return;
+
+    let badgeClass = 'pending';
+    let badgeText = '⏳ PENDING';
+    let titleText = 'Wynik weryfikacji 7D';
+    let desc = '';
+
+    if (outcome === 'TARGET_HIT') {
+      badgeClass = 'tp-hit';
+      badgeText = '🎯 TARGET HIT';
+      titleText = 'Sukces Modelu: Osiągnięto Poziom Take-Profit!';
+      desc = `Kurs Bitcoina osiągnął docelowy poziom TP ($${Number(res.resolvedPrice || 0).toLocaleString()}) w dniu ${hitDay}/7 od momentu wygenerowania sygnału.`;
+    } else if (outcome === 'INVALIDATED') {
+      badgeClass = 'sl-hit';
+      badgeText = '🛑 SL HIT';
+      titleText = 'Unieważnienie: Naruszenie Poziomu Stop-Loss';
+      desc = `Rynek wybił przeciwny poziom unieważnienia ($${Number(res.resolvedPrice || 0).toLocaleString()}) w dniu ${hitDay}/7. Strata ograniczona do założonego buforu.`;
+    } else if (outcome === 'EXPIRED_PROFIT') {
+      badgeClass = 'exp-profit';
+      badgeText = '⏱️ EXPIRED (+%)';
+      titleText = 'Zamknięcie na plusie po upływie 7 dni';
+      desc = `Po 7 dniach żaden skrajny poziom nie został wybity, ale pozycja zamknęła się z dodatnim zyskiem.`;
+    } else if (outcome === 'EXPIRED_LOSS') {
+      badgeClass = 'exp-loss';
+      badgeText = '⏱️ EXPIRED (-%)';
+      titleText = 'Zamknięcie na minusie po upływie 7 dni';
+      desc = `Po 7 dniach kurs nie wybił TP ani SL, zamykając się z niewielkim ujemnym wynikiem.`;
+    }
+
+    if (badgeEl) {
+      badgeEl.className = `outcome-badge ${badgeClass}`;
+      badgeEl.textContent = badgeText;
+    }
+    if (titleEl) titleEl.textContent = titleText;
+    if (msgEl) msgEl.textContent = desc;
+
+    if (pnlEl) {
+      const isPos = res.realizedReturnPercent != null && res.realizedReturnPercent > 0;
+      const isNeg = res.realizedReturnPercent != null && res.realizedReturnPercent < 0;
+      pnlEl.textContent = (isPos ? '+' : '') + retPct + '%';
+      pnlEl.style.color = isPos ? '#10b981' : isNeg ? '#f43f5e' : 'var(--text-main)';
+    }
+
+    if (btc7dEl) {
+      const btcRet = data.actualHistoricalOutcome && data.actualHistoricalOutcome.forwardReturn7d != null
+        ? (data.actualHistoricalOutcome.forwardReturn7d * 100).toFixed(1)
+        : '--';
+      btc7dEl.textContent = (Number(btcRet) > 0 ? '+' : '') + btcRet + '%';
+      btc7dEl.style.color = Number(btcRet) > 0 ? '#10b981' : Number(btcRet) < 0 ? '#f43f5e' : 'var(--text-main)';
+    }
+
+    if (hitdayEl) {
+      hitdayEl.textContent = `Dzień ${hitDay} z 7 (${res.resolvedDate || '--'})`;
+    }
+
+    if (verdictEl) {
+      const wasAcc = (data.prediction.signal === 'BULLISH_OPPORTUNITY' && res.outcomeStatus === 'TARGET_HIT') ||
+                     (data.prediction.signal === 'BEARISH_RISK' && res.outcomeStatus === 'TARGET_HIT');
+      verdictEl.textContent = wasAcc ? 'Trafny kierunek (Zwycięstwo)' : (outcome === 'INVALIDATED' ? 'Nietrafny (Zadziałał Stop-Loss)' : 'Ruch neutralny');
+      verdictEl.style.color = wasAcc ? '#10b981' : (outcome === 'INVALIDATED' ? '#f43f5e' : '#fbbf24');
+    }
+
+    outcomeCard.style.display = 'block';
+  }
+
+  function resetTimeMachine() {
+    if (!currentTimeMachineData || !currentTimeMachineData.historicalCandles) return;
+    if (tmPlaybackInterval) {
+      clearInterval(tmPlaybackInterval);
+      tmPlaybackInterval = null;
+    }
+
+    const histData = currentTimeMachineData.historicalCandles.map(c => ({
+      time: parseChartTime(c.time),
+      open: Number(c.open),
+      high: Number(c.high),
+      low: Number(c.low),
+      close: Number(c.close)
+    }));
+
+    if (tmCandleSeries) {
+      tmCandleSeries.setData(histData);
+    }
+    if (tmChart) {
+      tmChart.timeScale().fitContent();
+    }
+
+    const outcomeCard = document.getElementById('tm-outcome-card');
+    if (outcomeCard) outcomeCard.style.display = 'none';
+
+    const btnPlay = document.getElementById('btn-tm-play');
+    if (btnPlay) btnPlay.disabled = false;
+
+    const statusText = document.getElementById('tm-playback-status');
+    if (statusText) statusText.textContent = 'Zresetowano do dnia T. Kliknij ▶ Odtwórz, aby ponownie odkryć przyszłość.';
+  }
+
   // Application Entry Point
   window.addEventListener('DOMContentLoaded', async () => {
     initCharts();
@@ -1535,6 +2089,9 @@
 
     // Auto-run initial backtest metrics for display
     runBacktest();
+
+    // Priority 15: Initialize Time Machine
+    initTimeMachine();
   });
 
 })();
