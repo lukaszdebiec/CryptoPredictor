@@ -1184,7 +1184,7 @@
         const meetsCons = currentConsensusFilter === 'strong'
           ? (it.consensusVerdict && (it.consensusVerdict.includes('Strong') || it.consensusVerdict.includes('Unanimous')) && (it.consensusAgreementPercent >= 60))
           : true;
-        return meetsConv && meetsCons;
+        return meetsConv && meetsCons && it.signal !== 'NEUTRAL_HOLD';
       });
     }
 

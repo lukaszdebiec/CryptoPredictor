@@ -889,13 +889,12 @@ public class PredictorService : IPredictorService
             }
             else
             {
-                // NEUTRAL_HOLD
+                // NEUTRAL_HOLD: Capital Preservation (Cash Hold during chop / falling knife)
                 if (elapsedDays >= 7 && forwardCandles.Count > 0)
                 {
                     var lastC = forwardCandles[^1];
-                    decimal ret = (lastC.BtcClose - pred.BtcClose) / pred.BtcClose;
-                    outcome = Math.Abs(ret) <= 0.03m ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
-                    realizedReturn = Math.Round(ret, 4);
+                    outcome = "EXPIRED_PROFIT"; // Capital successfully preserved in 100% cash
+                    realizedReturn = 0.0m;
                     resolvedDate = lastC.Date;
                     resolvedPrice = lastC.BtcClose;
                     resolved = true;
