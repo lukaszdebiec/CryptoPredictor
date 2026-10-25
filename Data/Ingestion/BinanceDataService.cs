@@ -37,6 +37,8 @@ public class BinanceDataService : IBinanceDataService
 
             foreach (var item in jsonDoc.RootElement.EnumerateArray())
             {
+                if (item[6].GetInt64() >= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+                    continue; // Only final daily candles may enter features or labels.
                 var openTimeMs = item[0].GetInt64();
                 var date = DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(openTimeMs).UtcDateTime.Date);
                 var open = decimal.Parse(item[1].GetString()!, CultureInfo.InvariantCulture);

@@ -5,12 +5,16 @@ public sealed record BacktestSettings
     public decimal InitialCapital { get; init; } = 10_000m;
     public decimal EntryProbabilityThreshold { get; init; } = 0.60m; // Buy when probability >= 60%
     public int HoldingPeriodDays { get; init; } = 7;
-    public decimal? StopLossPercent { get; init; } = 0.04m; // Optional stop-loss: -4%
-    public decimal? TakeProfitPercent { get; init; } = 0.08m; // Optional take-profit: +8%
+    public decimal? StopLossPercent { get; init; } // null: use the forecast's risk policy
+    public decimal? TakeProfitPercent { get; init; }
+    public decimal FeePerSide { get; init; } = 0.0005m;
+    public decimal SlippagePerSide { get; init; } = 0.0005m;
+    public bool AllowShorts { get; init; } = true;
 }
 
 public sealed record TradeRecord
 {
+    public string Side { get; init; } = "LONG";
     public DateOnly EntryDate { get; init; }
     public decimal EntryPrice { get; init; }
     public DateOnly ExitDate { get; init; }
@@ -24,6 +28,11 @@ public sealed record TradeRecord
 
 public sealed record BacktestReport
 {
+    public string ModelVersion { get; init; } = CryptoPredictor.Prediction.PredictionPolicy.Version;
+    public DateOnly? EvaluationStart { get; init; }
+    public DateOnly? EvaluationEnd { get; init; }
+    public decimal? ProfitFactorValue { get; init; }
+    public IReadOnlyList<string> Assumptions { get; init; } = Array.Empty<string>();
     public decimal InitialCapital { get; init; }
     public decimal FinalCapital { get; init; }
     public decimal StrategyTotalReturnPercent { get; init; }

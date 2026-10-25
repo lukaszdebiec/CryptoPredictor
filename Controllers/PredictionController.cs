@@ -1,4 +1,5 @@
 using CryptoPredictor.Backtest;
+using CryptoPredictor.Data;
 using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
@@ -17,445 +18,125 @@ public class PredictionController : ControllerBase
     private readonly IMarketDataStorage _storage;
     private readonly IMarketDataAggregator _aggregator;
 
-    public PredictionController(
-        IPredictorService predictor,
-        ITurningPointDetector turningPointDetector,
-        IFeatureCalculator featureCalculator,
-        IMarketDataStorage storage,
-        IMarketDataAggregator aggregator)
+    public PredictionController(IPredictorService predictor, ITurningPointDetector turningPointDetector,
+        IFeatureCalculator featureCalculator, IMarketDataStorage storage, IMarketDataAggregator aggregator)
     {
-        _predictor = predictor;
-        _turningPointDetector = turningPointDetector;
-        _featureCalculator = featureCalculator;
-        _storage = storage;
-        _aggregator = aggregator;
+        _predictor = predictor; _turningPointDetector = turningPointDetector;
+        _featureCalculator = featureCalculator; _storage = storage; _aggregator = aggregator;
     }
 
-    /// <summary>
-    /// Trains the ML.NET Gradient Boosted Tree (FastTree) model using historical features and forward outcomes.
-    /// </summary>
+    private async Task<IReadOnlyList<DailyMarketData>> History(int days, CancellationToken ct)
+    {
+        var data = _storage.Exists() ? await _storage.LoadAsync(ct) : (IReadOnlyList<DailyMarketData>)[];
+        if (data.Count < Math.Min(days, 500))
+            data = await _aggregator.FetchAndAggregateAsync(days, saveToStorage: true, ct);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return data.Where(d => d.Date < today).OrderBy(d => d.Date).ToList();
+    }
+
     [HttpPost("train")]
-    public async Task<ActionResult<ModelTrainingMetrics>> TrainModel(
-        [FromQuery] int days = 365,
-        [FromQuery] int lookaheadDays = 7,
-        [FromQuery] decimal bullishThresholdPercent = 0.03m,
-        CancellationToken ct = default)
+    public async Task<ActionResult<ModelTrainingMetrics>> TrainModel([FromQuery] int days = 500,
+        [FromQuery] int lookaheadDays = 7, [FromQuery] decimal bullishThresholdPercent = 0m, CancellationToken ct = default)
     {
-        var marketData = _storage.Exists()
-            ? await _storage.LoadAsync(ct)
-            : await _aggregator.FetchAndAggregateAsync(days, saveToStorage: true, ct);
-
-        if (marketData.Count < 20)
-        {
-            marketData = await _aggregator.FetchAndAggregateAsync(days, saveToStorage: true, ct);
-        }
-
-        var features = _featureCalculator.Calculate(marketData);
-        var trainingDataset = _turningPointDetector.BuildTrainingDataset(marketData, features, lookaheadDays, bullishThresholdPercent);
-
-        if (trainingDataset.Count < 10)
-        {
-            return BadRequest($"Not enough labeled samples ({trainingDataset.Count}). Try increasing days to sync more history.");
-        }
-
-        var metrics = _predictor.TrainModel(trainingDataset);
-        return Ok(metrics);
+        if (days < 1 || days > 1000 || lookaheadDays != PredictionPolicy.HorizonDays || bullishThresholdPercent != 0m)
+            return BadRequest("direction-v1 supports days 1–1000 and the event: 7-day closing return > 0. Other label parameters are unsupported.");
+        var data = await History(days, ct);
+        var dataset = _turningPointDetector.BuildTrainingDataset(data, _featureCalculator.Calculate(data));
+        if (!PredictorService.CanTrain(dataset))
+            return BadRequest($"Insufficient eligible history: {dataset.Count} samples after a {PredictionPolicy.WarmupDays}-day warmup. At least {PredictionPolicy.MinimumDatasetSamples} and both chronological training classes are needed.");
+        return Ok(_predictor.TrainModel(dataset));
     }
 
-    /// <summary>
-    /// Evaluates today's real market conditions and returns the model's probabilistic directional signal and regime analysis.
-    /// </summary>
     [HttpGet("today")]
     public async Task<ActionResult<MarketPrediction>> GetTodayPrediction([FromQuery] bool forceRefresh = false, CancellationToken ct = default)
     {
-        if (!forceRefresh)
-        {
-            var saved = await _storage.GetLatestPredictionAsync(ct);
-            if (saved != null && saved.ProjectionCone != null && saved.ProjectionCone.Count > 0 && saved.TargetPrice > 0 && saved.Ensemble != null)
-            {
-                return Ok(saved);
-            }
-        }
-
-        var marketData = _storage.Exists()
-            ? await _storage.LoadAsync(ct)
-            : await _aggregator.FetchAndAggregateAsync(180, saveToStorage: true, ct);
-
-        if (marketData.Count == 0)
-            return StatusCode(500, "No market data available.");
-
-        var features = _featureCalculator.Calculate(marketData);
-
-        if (!_predictor.IsTrained && marketData.Count >= 20)
-        {
-            var trainingDataset = _turningPointDetector.BuildTrainingDataset(marketData, features, lookaheadDays: 7, bullishThreshold: 0.03m);
-            if (trainingDataset.Count >= 10)
-            {
-                _predictor.TrainModel(trainingDataset);
-            }
-        }
-
-        var todayFeatures = features.Last();
-        var todayMarket = marketData.Last();
-
-        var prediction = _predictor.Predict(todayFeatures, todayMarket);
-        await _storage.SavePredictionAsync(prediction, ct);
-        return Ok(prediction);
+        var data = await History(500, ct);
+        if (data.Count == 0) return StatusCode(503, "No closed daily market observations are available.");
+        var saved = await _storage.GetLatestPredictionAsync(ct);
+        // The first issued forecast for a signal day is immutable, including on forceRefresh.
+        if (saved?.Date == data[^1].Date && saved.ModelVersion == PredictionPolicy.Version)
+            return Ok(saved);
+        var features = _featureCalculator.Calculate(data);
+        var ready = PredictorService.PrepareForLatest(_predictor, data, features, _turningPointDetector);
+        var prediction = ready.Predict(features[^1], data[^1]);
+        var issued = await _storage.SavePredictionAsync(prediction, ct);
+        if (issued.ModelVersion != PredictionPolicy.Version)
+            return Ok(prediction);
+        return Ok(issued);
     }
 
-    /// <summary>
-    /// Returns historical daily market predictions generated by the background worker and stored in SQLite.
-    /// </summary>
     [HttpGet("history")]
     public async Task<ActionResult<IReadOnlyList<MarketPrediction>>> GetPredictionHistory([FromQuery] int limit = 30, CancellationToken ct = default)
-    {
-        var history = await _storage.GetPredictionHistoryAsync(limit, ct);
-        return Ok(history);
-    }
+        => Ok(await _storage.GetPredictionHistoryAsync(Math.Clamp(limit, 1, 1000), ct));
 
-    /// <summary>
-    /// Returns the Prediction Journal with automated 7-day outcome resolution (TP Hit, SL Hit, Expired) and performance stats.
-    /// Supports mode="historical" (expanding-window walk-forward ledger across ~180 days) and mode="live" (forward-testing journal).
-    /// </summary>
     [HttpGet("journal")]
-    public async Task<ActionResult<PredictionJournalResponse>> GetPredictionJournal(
-        [FromQuery] string mode = "historical",
-        [FromQuery] int limit = 250,
-        CancellationToken ct = default)
+    public async Task<ActionResult<PredictionJournalResponse>> GetPredictionJournal([FromQuery] string mode = "historical",
+        [FromQuery] int limit = 250, CancellationToken ct = default)
     {
-        if (string.Equals(mode, "live", StringComparison.OrdinalIgnoreCase))
-        {
-            var liveJournal = await _storage.GetPredictionJournalAsync(limit, ct);
-            return Ok(liveJournal with { Mode = "live" });
-        }
-
-        // Historical Walk-Forward Ledger
-        var marketData = _storage.Exists()
-            ? await _storage.LoadAsync(ct)
-            : await _aggregator.FetchAndAggregateAsync(365, saveToStorage: true, ct);
-
-        var features = _featureCalculator.Calculate(marketData);
-        var historicalJournal = _predictor.GenerateWalkForwardJournal(marketData, features, _turningPointDetector);
-
-        if (limit > 0 && historicalJournal.Items.Count > limit)
-        {
-            historicalJournal = historicalJournal with
-            {
-                Items = historicalJournal.Items.Take(limit).ToList()
-            };
-        }
-
-        return Ok(historicalJournal);
+        if (mode == "live") return Ok(await _storage.GetPredictionJournalAsync(Math.Clamp(limit, 1, 1000), ct));
+        if (mode != "historical") return BadRequest("Mode must be historical or live.");
+        var data = await History(500, ct);
+        var journal = _predictor.GenerateWalkForwardJournal(data, _featureCalculator.Calculate(data), _turningPointDetector);
+        // Stats and items must describe the same selected rows.
+        return Ok(PredictionOutcomeResolver.Journal(journal.Items.Take(Math.Clamp(limit, 1, 1000)), "historical"));
     }
 
-
-    /// <summary>
-    /// Returns historical turning points (local bottoms and tops) detected across the market dataset.
-    /// </summary>
     [HttpGet("turning-points")]
-    public async Task<ActionResult<IReadOnlyList<LabeledMarketDay>>> GetHistoricalTurningPoints(
-        [FromQuery] int window = 5,
-        [FromQuery] decimal minReversalPercent = 0.03m,
-        CancellationToken ct = default)
+    public async Task<ActionResult<IReadOnlyList<LabeledMarketDay>>> GetHistoricalTurningPoints([FromQuery] int window = 5,
+        [FromQuery] decimal minReversalPercent = 0.03m, CancellationToken ct = default)
     {
-        var marketData = _storage.Exists()
-            ? await _storage.LoadAsync(ct)
-            : await _aggregator.FetchAndAggregateAsync(180, saveToStorage: true, ct);
-
-        var labeled = _turningPointDetector.DetectTurningPoints(marketData, window, minReversalPercent);
-        return Ok(labeled);
+        if (window < 1 || window > 100 || minReversalPercent <= 0m) return BadRequest("Invalid turning-point parameters.");
+        return Ok(_turningPointDetector.DetectTurningPoints(await History(365, ct), window, minReversalPercent));
     }
 
-    /// <summary>
-    /// Evaluates what the model would have predicted on a specific historical date (Point-in-Time Prediction)
-    /// and compares it with the actual forward market outcome (3d, 7d, 14d returns).
-    /// </summary>
-    /// <param name="date">Historical date to evaluate.</param>
-    /// <param name="strictlyOutOfSample">If true, trains a dedicated model strictly on data prior to this date, guaranteeing zero future leakage.</param>
-    /// <summary>
-    /// Returns available date boundaries and suggested presets for the Back to the Future Time-Machine visual backtester.
-    /// </summary>
     [HttpGet("time-machine/range")]
     public async Task<IActionResult> GetTimeMachineRange(CancellationToken ct = default)
     {
-        var marketData = _storage.Exists()
-            ? await _storage.LoadAsync(ct)
-            : await _aggregator.FetchAndAggregateAsync(365, saveToStorage: true, ct);
-
-        if (marketData.Count == 0)
-            return StatusCode(500, "No market data available.");
-
-        var sortedMarket = marketData.OrderBy(d => d.Date).ToList();
-        // Date with at least 10 training samples with 7d lookahead
-        var minDate = sortedMarket.First().Date.AddDays(23);
-        // Ensure 7 forward candles exist
-        var maxDate = sortedMarket.Last().Date.AddDays(-7);
-
-        var presets = new[]
-        {
-            new { label = "📉 Dołek paniki ($83.5k)", date = "2026-09-28", description = "Lokalny dołek z dynamicznym odwróceniem w górę" },
-            new { label = "🚀 Euforyczny szczyt ($86.5k)", date = "2026-10-04", description = "Wykupienie rynku przed falą spadkową" },
-            new { label = "⚡ Odbicie z dołka ($81.7k)", date = "2026-10-08", description = "Wycięcie płynności i silny bounce" },
-            new { label = "🎯 Ostatni możliwy ($82.1k)", date = maxDate.ToString("yyyy-MM-dd"), description = "Ostatni dzień z kompletem 7 świec przyszłości" }
-        };
-
+        var data = await History(365, ct);
+        if (data.Count < PredictionPolicy.WarmupDays + PredictionPolicy.HorizonDays)
+            return StatusCode(503, "Insufficient closed daily history.");
+        var minDate = data[PredictionPolicy.WarmupDays - 1].Date;
+        var maxDate = data[^1].Date.AddDays(-PredictionPolicy.HorizonDays);
         return Ok(new
         {
-            MinDate = minDate.ToString("yyyy-MM-dd"),
-            MaxDate = maxDate.ToString("yyyy-MM-dd"),
-            DefaultDate = "2026-09-28",
-            TotalHistoricalDays = sortedMarket.Count,
-            Presets = presets
+            MinDate = minDate.ToString("yyyy-MM-dd"), MaxDate = maxDate.ToString("yyyy-MM-dd"),
+            DefaultDate = maxDate.ToString("yyyy-MM-dd"), TotalHistoricalDays = data.Count,
+            Presets = new[] { new { label = "Latest complete 7-day outcome", date = maxDate.ToString("yyyy-MM-dd"), description = "Earlier dates may have insufficient model training history." } }
         });
     }
 
-    /// <summary>
-    /// Evaluates what the model would have predicted on a specific historical date (Point-in-Time Prediction)
-    /// and returns prior candles, forward 7 candles, the forecast cone, and the empirical resolution.
-    /// </summary>
-    /// <param name="date">Historical date to evaluate.</param>
-    /// <param name="strictlyOutOfSample">If true, trains a dedicated model strictly on data prior to this date, guaranteeing zero future leakage.</param>
     [HttpGet("historical")]
-    public async Task<IActionResult> GetHistoricalDatePrediction(
-        [FromQuery] DateOnly date,
-        [FromQuery] bool strictlyOutOfSample = true,
-        CancellationToken ct = default)
+    public async Task<IActionResult> GetHistoricalDatePrediction([FromQuery] DateOnly date,
+        [FromQuery] bool strictlyOutOfSample = true, CancellationToken ct = default)
     {
-        var marketData = _storage.Exists()
-            ? await _storage.LoadAsync(ct)
-            : await _aggregator.FetchAndAggregateAsync(365, saveToStorage: true, ct);
-
-        var sortedMarket = marketData.OrderBy(d => d.Date).ToList();
-        var targetMarket = sortedMarket.FirstOrDefault(d => d.Date == date);
-        if (targetMarket == null)
-        {
-            return NotFound($"No market data found for date {date}. Available range: {sortedMarket.First().Date} to {sortedMarket.Last().Date}.");
-        }
-
-        var features = _featureCalculator.Calculate(sortedMarket);
-        var targetFeatures = features.FirstOrDefault(f => f.Date == date);
-        if (targetFeatures == null)
-        {
-            return NotFound($"No features calculated for date {date}.");
-        }
-
-        IPredictorService predictorToUse = _predictor;
-        int trainingSamplesUsed = 0;
-
-        if (strictlyOutOfSample)
-        {
-            // Strictly Out-of-Sample: The model trains ONLY on data that occurred BEFORE this date (with 7-day lookahead buffer)
-            var cutoffDate = date.AddDays(-7);
-            var historicalOnlyMarket = sortedMarket.Where(d => d.Date <= cutoffDate).ToList();
-            var historicalOnlyFeatures = features.Where(f => f.Date <= cutoffDate).ToList();
-
-            var trainingDataset = _turningPointDetector.BuildTrainingDataset(historicalOnlyMarket, historicalOnlyFeatures, lookaheadDays: 7);
-            trainingSamplesUsed = trainingDataset.Count;
-
-            var pointInTimePredictor = new PredictorService();
-            if (trainingDataset.Count >= 10)
-            {
-                pointInTimePredictor.TrainModel(trainingDataset);
-            }
-            predictorToUse = pointInTimePredictor;
-        }
-        else if (!_predictor.IsTrained)
-        {
-            var trainingDataset = _turningPointDetector.BuildTrainingDataset(sortedMarket, features, lookaheadDays: 7);
-            trainingSamplesUsed = trainingDataset.Count;
-            if (trainingDataset.Count >= 10)
-            {
-                _predictor.TrainModel(trainingDataset);
-            }
-        }
-
-        var prediction = predictorToUse.Predict(targetFeatures, targetMarket);
-        var labels = _turningPointDetector.DetectTurningPoints(sortedMarket);
-        var targetLabel = labels.FirstOrDefault(l => l.Date == date);
-
-        if (prediction.TargetPrice <= 0 || prediction.InvalidationPrice <= 0)
-        {
-            decimal targetPrice;
-            decimal invalidationPrice;
-            decimal targetChangePct;
-            decimal invalidationChangePct;
-
-            if (prediction.Signal == "BEARISH_RISK")
-            {
-                targetPrice = Math.Round(prediction.BtcClose * 0.92m, 2);
-                invalidationPrice = Math.Round(prediction.BtcClose * 1.04m, 2);
-                targetChangePct = -0.08m;
-                invalidationChangePct = 0.04m;
-            }
-            else
-            {
-                targetPrice = Math.Round(prediction.BtcClose * 1.08m, 2);
-                invalidationPrice = Math.Round(prediction.BtcClose * 0.96m, 2);
-                targetChangePct = 0.08m;
-                invalidationChangePct = -0.04m;
-            }
-
-            prediction = prediction with
-            {
-                TargetPrice = targetPrice,
-                InvalidationPrice = invalidationPrice,
-                TargetChangePercent = targetChangePct,
-                InvalidationChangePercent = invalidationChangePct,
-                RiskRewardRatio = 2.0m
-            };
-        }
-
-        // Prior candles up to and including 'date' (up to 60 candles)
-        var historicalCandles = sortedMarket
-            .Where(d => d.Date <= date)
-            .TakeLast(60)
-            .Select(d => new
-            {
-                time = d.Date.ToString("yyyy-MM-dd"),
-                open = d.BtcOpen,
-                high = d.BtcHigh,
-                low = d.BtcLow,
-                close = d.BtcClose,
-                volume = d.BtcVolume
-            })
-            .ToList();
-
-        // Forward 7 candles occurring after 'date'
-        var forwardMarket = sortedMarket
-            .Where(d => d.Date > date && d.Date <= date.AddDays(7))
-            .OrderBy(d => d.Date)
-            .ToList();
-
-        var forwardCandles = forwardMarket
-            .Select(d => new
-            {
-                time = d.Date.ToString("yyyy-MM-dd"),
-                open = d.BtcOpen,
-                high = d.BtcHigh,
-                low = d.BtcLow,
-                close = d.BtcClose,
-                volume = d.BtcVolume
-            })
-            .ToList();
-
-        // Resolution evaluation
-        string outcome = "PENDING";
-        decimal? realizedReturn = null;
-        int? hitDayIndex = null;
-        DateOnly? resolvedDate = null;
-        decimal? resolvedPrice = null;
-
-        if (prediction.Signal == "BULLISH_OPPORTUNITY")
-        {
-            for (int i = 0; i < forwardMarket.Count; i++)
-            {
-                var c = forwardMarket[i];
-                if (c.BtcHigh >= prediction.TargetPrice)
-                {
-                    outcome = "TARGET_HIT";
-                    realizedReturn = Math.Abs(prediction.TargetChangePercent);
-                    hitDayIndex = i;
-                    resolvedDate = c.Date;
-                    resolvedPrice = prediction.TargetPrice;
-                    break;
-                }
-                if (c.BtcLow <= prediction.InvalidationPrice)
-                {
-                    outcome = "INVALIDATED";
-                    realizedReturn = -Math.Abs(prediction.InvalidationChangePercent);
-                    hitDayIndex = i;
-                    resolvedDate = c.Date;
-                    resolvedPrice = prediction.InvalidationPrice;
-                    break;
-                }
-            }
-
-            if (outcome == "PENDING" && forwardMarket.Count > 0)
-            {
-                var lastC = forwardMarket.Last();
-                decimal ret = (lastC.BtcClose - targetMarket.BtcClose) / targetMarket.BtcClose;
-                outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
-                realizedReturn = Math.Round(ret, 4);
-                resolvedDate = lastC.Date;
-                resolvedPrice = lastC.BtcClose;
-                hitDayIndex = forwardMarket.Count - 1;
-            }
-        }
-        else if (prediction.Signal == "BEARISH_RISK")
-        {
-            for (int i = 0; i < forwardMarket.Count; i++)
-            {
-                var c = forwardMarket[i];
-                if (c.BtcLow <= prediction.TargetPrice)
-                {
-                    outcome = "TARGET_HIT";
-                    realizedReturn = Math.Abs(prediction.TargetChangePercent);
-                    hitDayIndex = i;
-                    resolvedDate = c.Date;
-                    resolvedPrice = prediction.TargetPrice;
-                    break;
-                }
-                if (c.BtcHigh >= prediction.InvalidationPrice)
-                {
-                    outcome = "INVALIDATED";
-                    realizedReturn = -Math.Abs(prediction.InvalidationChangePercent);
-                    hitDayIndex = i;
-                    resolvedDate = c.Date;
-                    resolvedPrice = prediction.InvalidationPrice;
-                    break;
-                }
-            }
-
-            if (outcome == "PENDING" && forwardMarket.Count > 0)
-            {
-                var lastC = forwardMarket.Last();
-                decimal ret = (targetMarket.BtcClose - lastC.BtcClose) / targetMarket.BtcClose;
-                outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
-                realizedReturn = Math.Round(ret, 4);
-                resolvedDate = lastC.Date;
-                resolvedPrice = lastC.BtcClose;
-                hitDayIndex = forwardMarket.Count - 1;
-            }
-        }
-        else
-        {
-            if (forwardMarket.Count > 0)
-            {
-                var lastC = forwardMarket.Last();
-                decimal ret = (lastC.BtcClose - targetMarket.BtcClose) / targetMarket.BtcClose;
-                outcome = Math.Abs(ret) <= 0.03m ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
-                realizedReturn = Math.Round(ret, 4);
-                resolvedDate = lastC.Date;
-                resolvedPrice = lastC.BtcClose;
-                hitDayIndex = forwardMarket.Count - 1;
-            }
-        }
-
+        if (!strictlyOutOfSample) return BadRequest("In-sample historical predictions are not supported. Use strictlyOutOfSample=true.");
+        var data = await History(365, ct);
+        var history = data.Where(d => d.Date <= date).ToList();
+        if (history.Count == 0 || history[^1].Date != date) return NotFound("No closed daily candle exists for that date.");
+        var features = _featureCalculator.Calculate(history);
+        var dataset = _turningPointDetector.BuildTrainingDataset(history, features);
+        using var predictor = new PredictorService();
+        if (PredictorService.CanTrain(dataset)) predictor.TrainModel(dataset);
+        var prediction = predictor.Predict(features[^1], history[^1]);
+        var outcome = PredictionOutcomeResolver.Resolve(prediction, data);
+        var forward = data.Where(d => d.Date > date && d.Date <= date.AddDays(7)).ToList();
+        object Candle(DailyMarketData d) => new { time = d.Date.ToString("yyyy-MM-dd"), open = d.BtcOpen, high = d.BtcHigh, low = d.BtcLow, close = d.BtcClose, volume = d.BtcVolume };
+        decimal? ForwardReturn(int days) => data.FirstOrDefault(d => d.Date == date.AddDays(days)) is { } d ? d.BtcClose / history[^1].BtcClose - 1m : null;
         return Ok(new
         {
-            Date = date,
-            BtcClose = targetMarket.BtcClose,
-            StrictlyOutOfSample = strictlyOutOfSample,
-            TrainingSamplesUsed = trainingSamplesUsed,
-            HistoricalCandles = historicalCandles,
-            ForwardCandles = forwardCandles,
-            Prediction = prediction,
+            Date = date, BtcClose = history[^1].BtcClose, StrictlyOutOfSample = true,
+            TrainingSamplesUsed = predictor.LastTrainingMetrics?.TrainingSampleCount ?? 0,
+            HistoricalCandles = history.TakeLast(60).Select(Candle), ForwardCandles = forward.Select(Candle), Prediction = prediction,
             Resolution = new
             {
-                OutcomeStatus = outcome,
-                RealizedReturnPercent = realizedReturn,
-                HitDayIndex = hitDayIndex,
-                ResolvedDate = resolvedDate,
-                ResolvedPrice = resolvedPrice
+                outcome.OutcomeStatus, outcome.RealizedReturnPercent, outcome.ResolvedDate, outcome.ResolvedPrice,
+                HitDayIndex = outcome.ResolvedDate.HasValue ? forward.FindIndex(d => d.Date == outcome.ResolvedDate) : (int?)null
             },
             ActualHistoricalOutcome = new
             {
-                ForwardReturn3d = targetLabel?.ForwardReturn3d,
-                ForwardReturn7d = targetLabel?.ForwardReturn7d,
-                ForwardReturn14d = targetLabel?.ForwardReturn14d,
-                TurningPoint = targetLabel?.TurningPoint.ToString(),
-                WasBullishPredictionAccurate = prediction.Signal == "BULLISH_OPPORTUNITY" ? (targetLabel?.ForwardReturn7d > 0.02m) : (bool?)null,
-                WasBearishPredictionAccurate = prediction.Signal == "BEARISH_RISK" ? (targetLabel?.ForwardReturn7d < 0m) : (bool?)null
+                ForwardReturn3d = ForwardReturn(3), ForwardReturn7d = ForwardReturn(7), ForwardReturn14d = ForwardReturn(14),
+                WasBullishPredictionAccurate = prediction.Signal == "BULLISH_OPPORTUNITY" ? outcome.DirectionCorrect : null,
+                WasBearishPredictionAccurate = prediction.Signal == "BEARISH_RISK" ? outcome.DirectionCorrect : null
             }
         });
     }
