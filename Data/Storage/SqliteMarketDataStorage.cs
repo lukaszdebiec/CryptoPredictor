@@ -57,14 +57,31 @@ public class SqliteMarketDataStorage : IMarketDataStorage
                     ""CreatedAtUtc"" TEXT NOT NULL
                 );", ct);
 
-            // Ensure EnsembleJson column exists on MarketPredictions table
-            try
+            // Ensure new columns exist on MarketPredictions table
+            string[] columnsToAdd = new[]
             {
-                await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""EnsembleJson"" TEXT NULL;", ct);
-            }
-            catch
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""EnsembleJson"" TEXT NULL;",
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""TargetPrice"" TEXT NULL;",
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""InvalidationPrice"" TEXT NULL;",
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""TargetChangePercent"" TEXT NULL;",
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""InvalidationChangePercent"" TEXT NULL;",
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""RiskRewardRatio"" TEXT NULL;",
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""OutcomeStatus"" TEXT NULL;",
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""RealizedReturnPercent"" TEXT NULL;",
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""ResolvedDate"" TEXT NULL;",
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""ResolvedPrice"" TEXT NULL;"
+            };
+
+            foreach (var sql in columnsToAdd)
             {
-                // Column already exists, safe to ignore
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(sql, ct);
+                }
+                catch
+                {
+                    // Column already exists, safe to ignore
+                }
             }
 
             // Auto-migration from legacy JSON cache if SQLite table is empty
@@ -199,6 +216,24 @@ public class SqliteMarketDataStorage : IMarketDataStorage
             existing.Confidence = prediction.Confidence;
             existing.KeyDriversJson = driversJson;
             existing.EnsembleJson = ensembleJson;
+
+            if (prediction.TargetPrice > 0)
+            {
+                existing.TargetPrice = prediction.TargetPrice;
+                existing.InvalidationPrice = prediction.InvalidationPrice;
+                existing.TargetChangePercent = prediction.TargetChangePercent;
+                existing.InvalidationChangePercent = prediction.InvalidationChangePercent;
+                existing.RiskRewardRatio = prediction.RiskRewardRatio;
+            }
+
+            if (!string.IsNullOrWhiteSpace(prediction.OutcomeStatus))
+            {
+                existing.OutcomeStatus = prediction.OutcomeStatus;
+                existing.RealizedReturnPercent = prediction.RealizedReturnPercent;
+                existing.ResolvedDate = prediction.ResolvedDate;
+                existing.ResolvedPrice = prediction.ResolvedPrice;
+            }
+
             existing.CreatedAtUtc = DateTime.UtcNow;
         }
         else
@@ -213,6 +248,15 @@ public class SqliteMarketDataStorage : IMarketDataStorage
                 Confidence = prediction.Confidence,
                 KeyDriversJson = driversJson,
                 EnsembleJson = ensembleJson,
+                TargetPrice = prediction.TargetPrice,
+                InvalidationPrice = prediction.InvalidationPrice,
+                TargetChangePercent = prediction.TargetChangePercent,
+                InvalidationChangePercent = prediction.InvalidationChangePercent,
+                RiskRewardRatio = prediction.RiskRewardRatio,
+                OutcomeStatus = prediction.OutcomeStatus,
+                RealizedReturnPercent = prediction.RealizedReturnPercent,
+                ResolvedDate = prediction.ResolvedDate,
+                ResolvedPrice = prediction.ResolvedPrice,
                 CreatedAtUtc = DateTime.UtcNow
             });
         }
@@ -249,6 +293,286 @@ public class SqliteMarketDataStorage : IMarketDataStorage
         return records.Select(MapToPrediction).ToList();
     }
 
+    public async Task<PredictionJournalResponse> GetPredictionJournalAsync(int limit = 50, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+
+        await using var db = await _contextFactory.CreateDbContextAsync(ct);
+
+        var predictions = await db.Predictions
+            .OrderByDescending(p => p.Date)
+            .Take(limit)
+            .ToListAsync(ct);
+
+        if (predictions.Count == 0)
+        {
+            return new PredictionJournalResponse
+            {
+                Stats = new LiveJournalStats(),
+                Items = Array.Empty<PredictionJournalItem>()
+            };
+        }
+
+        var minDate = predictions.Min(p => p.Date);
+        var allCandles = await db.MarketData
+            .AsNoTracking()
+            .Where(m => m.Date >= minDate)
+            .OrderBy(m => m.Date)
+            .ToListAsync(ct);
+
+        var latestCandle = allCandles.LastOrDefault();
+        var todayDate = latestCandle?.Date ?? DateOnly.FromDateTime(DateTime.UtcNow);
+
+        bool changesMade = false;
+        var items = new List<PredictionJournalItem>();
+
+        foreach (var pred in predictions)
+        {
+            // Ensure target and invalidation levels are present
+            decimal targetPrice = pred.TargetPrice;
+            decimal invalidationPrice = pred.InvalidationPrice;
+            decimal targetChangePct = pred.TargetChangePercent;
+            decimal invalidationChangePct = pred.InvalidationChangePercent;
+            decimal rrRatio = pred.RiskRewardRatio > 0 ? pred.RiskRewardRatio : 2.0m;
+
+            if (targetPrice <= 0 || invalidationPrice <= 0)
+            {
+                if (pred.Signal == "BEARISH_RISK")
+                {
+                    targetPrice = Math.Round(pred.BtcClose * 0.92m, 2);
+                    invalidationPrice = Math.Round(pred.BtcClose * 1.04m, 2);
+                    targetChangePct = -0.08m;
+                    invalidationChangePct = 0.04m;
+                }
+                else
+                {
+                    targetPrice = Math.Round(pred.BtcClose * 1.08m, 2);
+                    invalidationPrice = Math.Round(pred.BtcClose * 0.96m, 2);
+                    targetChangePct = 0.08m;
+                    invalidationChangePct = -0.04m;
+                }
+                pred.TargetPrice = targetPrice;
+                pred.InvalidationPrice = invalidationPrice;
+                pred.TargetChangePercent = targetChangePct;
+                pred.InvalidationChangePercent = invalidationChangePct;
+                pred.RiskRewardRatio = rrRatio;
+                changesMade = true;
+            }
+
+            int elapsedDays = todayDate.DayNumber - pred.Date.DayNumber;
+            string outcome = string.IsNullOrWhiteSpace(pred.OutcomeStatus) ? "PENDING" : pred.OutcomeStatus;
+            decimal? realizedReturn = pred.RealizedReturnPercent;
+            decimal? unrealizedReturn = null;
+            DateOnly? resolvedDate = pred.ResolvedDate;
+            decimal? resolvedPrice = pred.ResolvedPrice;
+
+            if (outcome == "PENDING")
+            {
+                var forwardCandles = allCandles
+                    .Where(c => c.Date > pred.Date && c.Date <= pred.Date.AddDays(7))
+                    .OrderBy(c => c.Date)
+                    .ToList();
+
+                bool resolved = false;
+
+                if (pred.Signal == "BULLISH_OPPORTUNITY")
+                {
+                    foreach (var c in forwardCandles)
+                    {
+                        if (c.BtcHigh >= targetPrice)
+                        {
+                            outcome = "TARGET_HIT";
+                            realizedReturn = Math.Abs(targetChangePct);
+                            resolvedDate = c.Date;
+                            resolvedPrice = targetPrice;
+                            resolved = true;
+                            break;
+                        }
+                        if (c.BtcLow <= invalidationPrice)
+                        {
+                            outcome = "INVALIDATED";
+                            realizedReturn = -Math.Abs(invalidationChangePct);
+                            resolvedDate = c.Date;
+                            resolvedPrice = invalidationPrice;
+                            resolved = true;
+                            break;
+                        }
+                    }
+
+                    if (!resolved)
+                    {
+                        if (elapsedDays >= 7 && forwardCandles.Count > 0)
+                        {
+                            var lastC = forwardCandles.Last();
+                            decimal ret = (lastC.BtcClose - pred.BtcClose) / pred.BtcClose;
+                            outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
+                            realizedReturn = Math.Round(ret, 4);
+                            resolvedDate = lastC.Date;
+                            resolvedPrice = lastC.BtcClose;
+                            resolved = true;
+                        }
+                        else if (latestCandle != null && latestCandle.Date > pred.Date)
+                        {
+                            unrealizedReturn = Math.Round((latestCandle.BtcClose - pred.BtcClose) / pred.BtcClose, 4);
+                        }
+                    }
+                }
+                else if (pred.Signal == "BEARISH_RISK")
+                {
+                    foreach (var c in forwardCandles)
+                    {
+                        if (c.BtcLow <= targetPrice)
+                        {
+                            outcome = "TARGET_HIT";
+                            realizedReturn = Math.Abs(targetChangePct);
+                            resolvedDate = c.Date;
+                            resolvedPrice = targetPrice;
+                            resolved = true;
+                            break;
+                        }
+                        if (c.BtcHigh >= invalidationPrice)
+                        {
+                            outcome = "INVALIDATED";
+                            realizedReturn = -Math.Abs(invalidationChangePct);
+                            resolvedDate = c.Date;
+                            resolvedPrice = invalidationPrice;
+                            resolved = true;
+                            break;
+                        }
+                    }
+
+                    if (!resolved)
+                    {
+                        if (elapsedDays >= 7 && forwardCandles.Count > 0)
+                        {
+                            var lastC = forwardCandles.Last();
+                            decimal ret = (pred.BtcClose - lastC.BtcClose) / pred.BtcClose;
+                            outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
+                            realizedReturn = Math.Round(ret, 4);
+                            resolvedDate = lastC.Date;
+                            resolvedPrice = lastC.BtcClose;
+                            resolved = true;
+                        }
+                        else if (latestCandle != null && latestCandle.Date > pred.Date)
+                        {
+                            unrealizedReturn = Math.Round((pred.BtcClose - latestCandle.BtcClose) / pred.BtcClose, 4);
+                        }
+                    }
+                }
+                else
+                {
+                    // NEUTRAL_HOLD
+                    if (elapsedDays >= 7 && forwardCandles.Count > 0)
+                    {
+                        var lastC = forwardCandles.Last();
+                        decimal ret = (lastC.BtcClose - pred.BtcClose) / pred.BtcClose;
+                        outcome = Math.Abs(ret) <= 0.03m ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
+                        realizedReturn = Math.Round(ret, 4);
+                        resolvedDate = lastC.Date;
+                        resolvedPrice = lastC.BtcClose;
+                        resolved = true;
+                    }
+                }
+
+                if (resolved)
+                {
+                    pred.OutcomeStatus = outcome;
+                    pred.RealizedReturnPercent = realizedReturn;
+                    pred.ResolvedDate = resolvedDate;
+                    pred.ResolvedPrice = resolvedPrice;
+                    changesMade = true;
+                }
+            }
+
+            string? verdict = null;
+            decimal? agreement = null;
+            if (!string.IsNullOrWhiteSpace(pred.EnsembleJson))
+            {
+                try
+                {
+                    var ens = JsonSerializer.Deserialize<EnsembleConsensusDetails>(pred.EnsembleJson);
+                    if (ens != null)
+                    {
+                        verdict = ens.ConsensusVerdict;
+                        agreement = ens.ConsensusAgreementPercent;
+                    }
+                }
+                catch { }
+            }
+
+            items.Add(new PredictionJournalItem
+            {
+                Date = pred.Date,
+                BtcClose = pred.BtcClose,
+                Signal = pred.Signal,
+                BullishProbability = pred.BullishProbability,
+                MarketRegime = pred.MarketRegime,
+                Confidence = pred.Confidence,
+                TargetPrice = targetPrice,
+                InvalidationPrice = invalidationPrice,
+                TargetChangePercent = targetChangePct,
+                InvalidationChangePercent = invalidationChangePct,
+                RiskRewardRatio = rrRatio,
+                HorizonDays = 7,
+                ConsensusVerdict = verdict,
+                ConsensusAgreementPercent = agreement,
+                OutcomeStatus = outcome,
+                RealizedReturnPercent = realizedReturn,
+                UnrealizedReturnPercent = unrealizedReturn,
+                ResolvedDate = resolvedDate,
+                ResolvedPrice = resolvedPrice,
+                ElapsedDays = Math.Min(elapsedDays, 7)
+            });
+        }
+
+        if (changesMade)
+        {
+            await db.SaveChangesAsync(ct);
+        }
+
+        var resolvedItems = items.Where(i => i.OutcomeStatus != "PENDING").ToList();
+        int resolvedCount = resolvedItems.Count;
+        int pendingCount = items.Count - resolvedCount;
+
+        int targetHits = resolvedItems.Count(i => i.OutcomeStatus == "TARGET_HIT");
+        int invalidations = resolvedItems.Count(i => i.OutcomeStatus == "INVALIDATED");
+        int expiredProfits = resolvedItems.Count(i => i.OutcomeStatus == "EXPIRED_PROFIT");
+        int expiredLosses = resolvedItems.Count(i => i.OutcomeStatus == "EXPIRED_LOSS");
+
+        int winningTrades = targetHits + expiredProfits;
+        decimal winRate = resolvedCount > 0 ? Math.Round((decimal)winningTrades / resolvedCount * 100m, 1) : 0m;
+        decimal targetHitRate = resolvedCount > 0 ? Math.Round((decimal)targetHits / resolvedCount * 100m, 1) : 0m;
+
+        decimal totalGains = resolvedItems.Where(i => (i.RealizedReturnPercent ?? 0m) > 0).Sum(i => i.RealizedReturnPercent ?? 0m);
+        decimal totalLosses = Math.Abs(resolvedItems.Where(i => (i.RealizedReturnPercent ?? 0m) < 0).Sum(i => i.RealizedReturnPercent ?? 0m));
+
+        decimal profitFactor = totalLosses > 0 ? Math.Round(totalGains / totalLosses, 2) : (totalGains > 0 ? 99m : 1m);
+        decimal cumulativeReturn = Math.Round(resolvedItems.Sum(i => i.RealizedReturnPercent ?? 0m) * 100m, 1);
+        decimal avgReturn = resolvedCount > 0 ? Math.Round(cumulativeReturn / resolvedCount, 2) : 0m;
+
+        var stats = new LiveJournalStats
+        {
+            TotalPredictions = items.Count,
+            ResolvedPredictions = resolvedCount,
+            PendingPredictions = pendingCount,
+            TargetHits = targetHits,
+            Invalidations = invalidations,
+            ExpiredProfits = expiredProfits,
+            ExpiredLosses = expiredLosses,
+            WinRatePercent = winRate,
+            TargetHitRatePercent = targetHitRate,
+            ProfitFactor = profitFactor,
+            CumulativeReturnPercent = cumulativeReturn,
+            AverageReturnPercent = avgReturn
+        };
+
+        return new PredictionJournalResponse
+        {
+            Stats = stats,
+            Items = items
+        };
+    }
+
     private static MarketPrediction MapToPrediction(MarketPredictionRecord r)
     {
         IReadOnlyList<string> drivers;
@@ -283,7 +607,16 @@ public class SqliteMarketDataStorage : IMarketDataStorage
             MarketRegime = r.MarketRegime,
             Confidence = r.Confidence,
             KeyDrivers = drivers,
-            Ensemble = ensemble
+            Ensemble = ensemble,
+            TargetPrice = r.TargetPrice,
+            InvalidationPrice = r.InvalidationPrice,
+            TargetChangePercent = r.TargetChangePercent,
+            InvalidationChangePercent = r.InvalidationChangePercent,
+            RiskRewardRatio = r.RiskRewardRatio > 0 ? r.RiskRewardRatio : 2.0m,
+            OutcomeStatus = string.IsNullOrWhiteSpace(r.OutcomeStatus) ? "PENDING" : r.OutcomeStatus,
+            RealizedReturnPercent = r.RealizedReturnPercent,
+            ResolvedDate = r.ResolvedDate,
+            ResolvedPrice = r.ResolvedPrice
         };
     }
 }

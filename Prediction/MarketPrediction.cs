@@ -68,5 +68,59 @@ public sealed record MarketPrediction
     public IReadOnlyList<PredictionConePoint> ProjectionCone { get; init; } = Array.Empty<PredictionConePoint>();
 
     public EnsembleConsensusDetails? Ensemble { get; init; }
+
+    public string OutcomeStatus { get; init; } = "PENDING";
+    public decimal? RealizedReturnPercent { get; init; }
+    public DateOnly? ResolvedDate { get; init; }
+    public decimal? ResolvedPrice { get; init; }
+}
+
+public sealed record PredictionJournalItem
+{
+    public DateOnly Date { get; init; }
+    public decimal BtcClose { get; init; }
+    public string Signal { get; init; } = default!;
+    public decimal BullishProbability { get; init; }
+    public string MarketRegime { get; init; } = default!;
+    public string Confidence { get; init; } = default!;
+    public decimal TargetPrice { get; init; }
+    public decimal InvalidationPrice { get; init; }
+    public decimal TargetChangePercent { get; init; }
+    public decimal InvalidationChangePercent { get; init; }
+    public decimal RiskRewardRatio { get; init; }
+    public int HorizonDays { get; init; } = 7;
+
+    public string? ConsensusVerdict { get; init; }
+    public decimal? ConsensusAgreementPercent { get; init; }
+
+    // Outcome tracking
+    public string OutcomeStatus { get; init; } = "PENDING"; // PENDING, TARGET_HIT, INVALIDATED, EXPIRED_PROFIT, EXPIRED_LOSS
+    public decimal? RealizedReturnPercent { get; init; }
+    public decimal? UnrealizedReturnPercent { get; init; }
+    public DateOnly? ResolvedDate { get; init; }
+    public decimal? ResolvedPrice { get; init; }
+    public int ElapsedDays { get; init; }
+}
+
+public sealed record LiveJournalStats
+{
+    public int TotalPredictions { get; init; }
+    public int ResolvedPredictions { get; init; }
+    public int PendingPredictions { get; init; }
+    public int TargetHits { get; init; }
+    public int Invalidations { get; init; }
+    public int ExpiredProfits { get; init; }
+    public int ExpiredLosses { get; init; }
+    public decimal WinRatePercent { get; init; }
+    public decimal TargetHitRatePercent { get; init; }
+    public decimal ProfitFactor { get; init; }
+    public decimal CumulativeReturnPercent { get; init; }
+    public decimal AverageReturnPercent { get; init; }
+}
+
+public sealed record PredictionJournalResponse
+{
+    public LiveJournalStats Stats { get; init; } = default!;
+    public IReadOnlyList<PredictionJournalItem> Items { get; init; } = Array.Empty<PredictionJournalItem>();
 }
 

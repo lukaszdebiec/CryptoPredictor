@@ -1097,18 +1097,50 @@
     }
   }
 
-  // Load Historical Predictions into Table
+  // Load Historical Predictions Journal & Live Accuracy Metrics into Table
   async function loadHistoricalPredictions() {
     try {
-      const res = await fetch('/api/prediction/history?limit=10');
+      const res = await fetch('/api/prediction/journal?limit=30');
       if (!res.ok) return;
 
-      const items = await res.json();
+      const data = await res.json();
+      const stats = data.stats;
+      const items = data.items;
       const tbody = document.getElementById('history-table-body');
       if (!tbody) return;
 
+      // Populate Live KPI Stats Bar
+      if (stats) {
+        const elWinRate = document.getElementById('j-stat-winrate');
+        const elTargetRate = document.getElementById('j-stat-targetrate');
+        const elProfitFactor = document.getElementById('j-stat-profitfactor');
+        const elCumPnl = document.getElementById('j-stat-cumpnl');
+        const elCounts = document.getElementById('j-stat-counts');
+
+        if (elWinRate) {
+          elWinRate.innerText = stats.resolvedPredictions > 0 ? `${Number(stats.winRatePercent).toFixed(1)}%` : '--%';
+          elWinRate.style.color = stats.winRatePercent >= 55 ? '#34d399' : (stats.winRatePercent > 0 ? '#fb7185' : 'var(--text-main)');
+        }
+        if (elTargetRate) {
+          elTargetRate.innerText = stats.resolvedPredictions > 0 ? `${Number(stats.targetHitRatePercent).toFixed(1)}%` : '--%';
+          elTargetRate.style.color = stats.targetHitRatePercent >= 40 ? '#34d399' : 'var(--text-main)';
+        }
+        if (elProfitFactor) {
+          elProfitFactor.innerText = stats.resolvedPredictions > 0 ? Number(stats.profitFactor).toFixed(2) : '--';
+          elProfitFactor.style.color = stats.profitFactor >= 1.5 ? '#34d399' : (stats.profitFactor < 1.0 ? '#fb7185' : 'var(--text-main)');
+        }
+        if (elCumPnl) {
+          const pnlVal = Number(stats.cumulativeReturnPercent);
+          elCumPnl.innerText = stats.resolvedPredictions > 0 ? `${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(1)}%` : '--%';
+          elCumPnl.style.color = pnlVal > 0 ? '#34d399' : (pnlVal < 0 ? '#fb7185' : 'var(--text-main)');
+        }
+        if (elCounts) {
+          elCounts.innerText = `${stats.resolvedPredictions} / ${stats.pendingPredictions}`;
+        }
+      }
+
       if (!items || items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 1.5rem; color: var(--text-dim);">No recorded predictions yet. The first will be saved after the daily 00:05 UTC cycle.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2rem; color: var(--text-dim);">No recorded predictions yet. The first will be recorded after the daily 00:05 UTC cycle.</td></tr>`;
         return;
       }
 
@@ -1117,23 +1149,79 @@
         if (item.signal === 'BULLISH_OPPORTUNITY') badgeClass = 'bullish';
         if (item.signal === 'BEARISH_RISK') badgeClass = 'bearish';
 
-        const probPercent = (item.bullishProbability * 100).toFixed(1) + '%';
-        const priceStr = formatMoney(item.btcClose ?? item.btcPrice);
+        const priceStr = formatMoney(item.btcClose);
+
+        // Target & Invalidation compact cell
+        const tpSign = item.targetChangePercent >= 0 ? '+' : '';
+        const slSign = item.invalidationChangePercent >= 0 ? '+' : '';
+        const tpStr = `TP: $${Number(item.targetPrice).toLocaleString('en-US')} (${tpSign}${(item.targetChangePercent * 100).toFixed(1)}%)`;
+        const slStr = `SL: $${Number(item.invalidationPrice).toLocaleString('en-US')} (${slSign}${(item.invalidationChangePercent * 100).toFixed(1)}%)`;
+        const targetsHtml = `
+          <div class="targets-cell">
+            <span class="tp-text">${escapeHtml(tpStr)}</span>
+            <span class="sl-text">${escapeHtml(slStr)}</span>
+          </div>
+        `;
+
+        // Consensus summary
+        let consensusHtml = '<span style="color:var(--text-dim); font-size:0.75rem;">--</span>';
+        if (item.consensusVerdict) {
+          const agreeStr = item.consensusAgreementPercent ? ` (${Math.round(item.consensusAgreementPercent)}%)` : '';
+          consensusHtml = `<span style="font-family:var(--font-mono); font-size:0.72rem; color:#a5b4fc;">${escapeHtml(item.consensusVerdict)}${agreeStr}</span>`;
+        }
+
+        // Outcome Badge
+        let outcomeBadgeHtml;
+        let pnlHtml;
+
+        switch (item.outcomeStatus) {
+          case 'TARGET_HIT':
+            outcomeBadgeHtml = `<span class="outcome-badge tp-hit">🎯 TP HIT</span>`;
+            break;
+          case 'INVALIDATED':
+            outcomeBadgeHtml = `<span class="outcome-badge sl-hit">🛑 SL HIT</span>`;
+            break;
+          case 'EXPIRED_PROFIT':
+            outcomeBadgeHtml = `<span class="outcome-badge exp-profit">⏱️ EXPIRED</span>`;
+            break;
+          case 'EXPIRED_LOSS':
+            outcomeBadgeHtml = `<span class="outcome-badge exp-loss">⏱️ EXPIRED</span>`;
+            break;
+          default:
+            outcomeBadgeHtml = `<span class="outcome-badge pending">⏳ DAY ${item.elapsedDays}/7</span>`;
+            break;
+        }
+
+        // Realized or Unrealized PnL Cell
+        if (item.outcomeStatus !== 'PENDING' && item.realizedReturnPercent !== null && item.realizedReturnPercent !== undefined) {
+          const ret = Number(item.realizedReturnPercent) * 100;
+          const isPos = ret > 0;
+          const sign = isPos ? '+' : '';
+          pnlHtml = `<span class="pnl-cell ${isPos ? 'positive' : 'negative'}">${sign}${ret.toFixed(1)}%</span>`;
+        } else if (item.unrealizedReturnPercent !== null && item.unrealizedReturnPercent !== undefined) {
+          const uRet = Number(item.unrealizedReturnPercent) * 100;
+          const isPos = uRet >= 0;
+          const sign = isPos ? '+' : '';
+          pnlHtml = `<span class="pnl-cell unrealized" title="Unrealized floating return">${sign}${uRet.toFixed(1)}% (open)</span>`;
+        } else {
+          pnlHtml = `<span class="pnl-cell unrealized">--</span>`;
+        }
 
         return `
           <tr>
-            <td>${item.date}</td>
-            <td>${priceStr}</td>
+            <td style="font-family: var(--font-mono); font-size: 0.75rem;">${item.date}</td>
+            <td style="font-family: var(--font-mono); font-weight: 600;">${priceStr}</td>
             <td><span class="tag-badge ${badgeClass}">${escapeHtml(item.signal)}</span></td>
-            <td><strong>${probPercent}</strong></td>
-            <td>${escapeHtml(item.marketRegime || '--')}</td>
-            <td><span style="color: var(--text-dim);">${escapeHtml(item.confidence || '--')}</span></td>
+            <td>${targetsHtml}</td>
+            <td>${consensusHtml}</td>
+            <td>${outcomeBadgeHtml}</td>
+            <td>${pnlHtml}</td>
           </tr>
         `;
       }).join('');
 
     } catch (err) {
-      console.error('Failed to load historical predictions:', err);
+      console.error('Failed to load live prediction journal:', err);
     }
   }
 

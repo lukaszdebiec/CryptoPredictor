@@ -138,6 +138,22 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] **Interfejs Użytkownika:**
   - Przebudowa karty głównej na `ML ENSEMBLE CONSENSUS` z dynamiczną plakietką poziomu zgodności (np. `85% Agree`), paskiem prawdopodobieństwa oraz rozwijaną siatką modeli z paskami postępu i wagami.
 
+### Priorytet 14: Dziennik Trafności Predykcji i Rozliczanie Sygnałów na Żywo (Live Forward-Testing & Realized PnL Tracker) ✅
+- [x] **Silnik Automatycznego Rozliczania Sygnałów (Forward-Testing Outcome Resolver):**
+  - Ciągłe śledzenie zrealizowanego wyniku dla każdej historycznej predykcji w 7-dniowym oknie w przód:
+    - `TARGET_HIT` – cena osiągnęła pełny poziom Take-Profit (np. $+8.0\%$).
+    - `INVALIDATED` – cena wybiła poziom Stop-Loss (np. $-4.0\%$).
+    - `EXPIRED_PROFIT` / `EXPIRED_LOSS` – upłynął horyzont 7 dni, rozliczenie po cenie zamknięcia 7. dnia.
+    - `PENDING` – transakcja w toku z kalkulacją bieżącego niezrealizowanego PnL (np. `Dzień 2/7, +1.8%`).
+- [x] **Pasek Zbiorczych Metryk Skuteczności (Live KPI Performance Bar):**
+  - Dynamiczne obliczanie: **Win Rate** (% zyskownych pozycji), **Target Hit Rate** (% pełnych TP), **Profit Factor** ($\sum \text{Gains} / \sum |\text{Losses}|$), **Cumulative Realized PnL** oraz licznika pozycji zamkniętych vs w toku.
+- [x] **Rozbudowa Tabeli SQLite & Bazy Danych:**
+  - Automatyczna migracja kolumn w tabeli `MarketPredictions`: `TargetPrice`, `InvalidationPrice`, `TargetChangePercent`, `InvalidationChangePercent`, `RiskRewardRatio`, `OutcomeStatus`, `RealizedReturnPercent`, `ResolvedDate`, `ResolvedPrice`.
+- [x] **Nowy Endpoint API (`GET /api/prediction/journal`):**
+  - Zwraca zagregowane metryki skuteczności oraz pełną listę pozycji z wyliczonym statusem i zrealizowaną stopą zwrotu.
+- [x] **Nowoczesny Interfejs Tabeli Journala:**
+  - Przebudowa tabeli na 7 kolumn: `Data`, `BTC Close`, `Sygnał`, `Targety (TP / SL)`, `Konsensus`, `Wynik 7D`, `Zrealizowany PnL` z kolorowymi plakietkami (`🎯 TP HIT`, `🛑 SL HIT`, `⏱️ EXPIRED`, `⏳ PENDING`).
+
 ---
 
 

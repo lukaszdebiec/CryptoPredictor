@@ -113,6 +113,16 @@ public class PredictionController : ControllerBase
         return Ok(history);
     }
 
+    /// <summary>
+    /// Returns the live Forward-Testing Prediction Journal with automated 7-day outcome resolution (TP Hit, SL Hit, Expired) and performance stats.
+    /// </summary>
+    [HttpGet("journal")]
+    public async Task<ActionResult<PredictionJournalResponse>> GetPredictionJournal([FromQuery] int limit = 50, CancellationToken ct = default)
+    {
+        var journal = await _storage.GetPredictionJournalAsync(limit, ct);
+        return Ok(journal);
+    }
+
 
     /// <summary>
     /// Returns historical turning points (local bottoms and tops) detected across the market dataset.
