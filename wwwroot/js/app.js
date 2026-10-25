@@ -1572,7 +1572,7 @@
       }
     });
 
-    tmCandleSeries = tmChart.addCandlestickSeries({
+    tmCandleSeries = tmChart.addSeries(window.LightweightCharts.CandlestickSeries, {
       upColor: '#10b981',
       downColor: '#f43f5e',
       borderVisible: false,
@@ -1580,26 +1580,26 @@
       wickDownColor: '#f43f5e'
     });
 
-    tmUpperConeSeries = tmChart.addLineSeries({
+    tmUpperConeSeries = tmChart.addSeries(window.LightweightCharts.LineSeries, {
       color: 'rgba(56, 189, 248, 0.7)',
       lineWidth: 1,
-      lineStyle: 2,
+      lineStyle: window.LightweightCharts.LineStyle.Dashed,
       priceLineVisible: false,
       title: 'Upper Band (+1σ)'
     });
 
-    tmLowerConeSeries = tmChart.addLineSeries({
+    tmLowerConeSeries = tmChart.addSeries(window.LightweightCharts.LineSeries, {
       color: 'rgba(56, 189, 248, 0.7)',
       lineWidth: 1,
-      lineStyle: 2,
+      lineStyle: window.LightweightCharts.LineStyle.Dashed,
       priceLineVisible: false,
       title: 'Lower Band (-1σ)'
     });
 
-    tmExpectedLineSeries = tmChart.addLineSeries({
+    tmExpectedLineSeries = tmChart.addSeries(window.LightweightCharts.LineSeries, {
       color: '#f59e0b',
       lineWidth: 2,
-      lineStyle: 0,
+      lineStyle: window.LightweightCharts.LineStyle.Solid,
       priceLineVisible: false,
       title: 'Expected Path'
     });
@@ -1797,7 +1797,7 @@
           price: tp,
           color: '#10b981',
           lineWidth: 2,
-          lineStyle: 1,
+          lineStyle: window.LightweightCharts.LineStyle.Dashed,
           axisLabelVisible: true,
           title: `🎯 TP: $${tp.toLocaleString()}`
         });
@@ -1807,7 +1807,7 @@
           price: sl,
           color: '#f43f5e',
           lineWidth: 2,
-          lineStyle: 1,
+          lineStyle: window.LightweightCharts.LineStyle.Dashed,
           axisLabelVisible: true,
           title: `🛑 SL: $${sl.toLocaleString()}`
         });
