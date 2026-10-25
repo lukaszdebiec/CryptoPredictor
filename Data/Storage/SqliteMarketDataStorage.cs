@@ -2,6 +2,7 @@ using System.Text.Json;
 using CryptoPredictor.Data;
 using CryptoPredictor.Prediction;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 
 namespace CryptoPredictor.Data.Storage;
 
@@ -60,6 +61,8 @@ public class SqliteMarketDataStorage : IMarketDataStorage
             // Ensure new columns exist on MarketPredictions table
             string[] columnsToAdd = new[]
             {
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""PredictionJson"" TEXT NULL;",
+                @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""FeatureSnapshotJson"" TEXT NULL;",
                 @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""EnsembleJson"" TEXT NULL;",
                 @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""TargetPrice"" TEXT NULL;",
                 @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""InvalidationPrice"" TEXT NULL;",
@@ -72,34 +75,17 @@ public class SqliteMarketDataStorage : IMarketDataStorage
                 @"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""ResolvedPrice"" TEXT NULL;"
             };
 
+            await db.Database.OpenConnectionAsync(ct);
+            var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var command = db.Database.GetDbConnection().CreateCommand())
+            {
+                command.CommandText = "PRAGMA table_info('MarketPredictions')";
+                await using var reader = await command.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct)) existingColumns.Add(reader.GetString(1));
+            }
             foreach (var sql in columnsToAdd)
-            {
-                try
-                {
+                if (!existingColumns.Contains(sql.Split('"')[3]))
                     await db.Database.ExecuteSqlRawAsync(sql, ct);
-                }
-                catch
-                {
-                    // Column already exists, safe to ignore
-                }
-            }
-
-            // Backfill null values for legacy records
-            try
-            {
-                await db.Database.ExecuteSqlRawAsync(@"
-                    UPDATE ""MarketPredictions"" SET ""TargetPrice"" = '0' WHERE ""TargetPrice"" IS NULL;
-                    UPDATE ""MarketPredictions"" SET ""InvalidationPrice"" = '0' WHERE ""InvalidationPrice"" IS NULL;
-                    UPDATE ""MarketPredictions"" SET ""TargetChangePercent"" = '0' WHERE ""TargetChangePercent"" IS NULL;
-                    UPDATE ""MarketPredictions"" SET ""InvalidationChangePercent"" = '0' WHERE ""InvalidationChangePercent"" IS NULL;
-                    UPDATE ""MarketPredictions"" SET ""RiskRewardRatio"" = '2.0' WHERE ""RiskRewardRatio"" IS NULL;
-                    UPDATE ""MarketPredictions"" SET ""OutcomeStatus"" = 'PENDING' WHERE ""OutcomeStatus"" IS NULL;
-                ", ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to backfill default values for MarketPredictions nullable columns.");
-            }
 
             // Auto-migration from legacy JSON cache if SQLite table is empty
             if (!await db.MarketData.AnyAsync(ct))
@@ -114,6 +100,8 @@ public class SqliteMarketDataStorage : IMarketDataStorage
                         var records = await JsonSerializer.DeserializeAsync<List<DailyMarketData>>(stream, cancellationToken: ct);
                         if (records != null && records.Count > 0)
                         {
+                            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                            records = records.Where(d => d.Date < today).ToList();
                             db.MarketData.AddRange(records);
                             await db.SaveChangesAsync(ct);
                             _logger.LogInformation("Successfully migrated {Count} historical market records to SQLite!", records.Count);
@@ -152,7 +140,10 @@ public class SqliteMarketDataStorage : IMarketDataStorage
 
     public async Task SaveAsync(IReadOnlyList<DailyMarketData> data, CancellationToken ct = default)
     {
-        if (data == null || data.Count == 0)
+        ArgumentNullException.ThrowIfNull(data);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        data = data.Where(d => d.Date < today).ToList();
+        if (data.Count == 0)
             return;
 
         await EnsureInitializedAsync(ct);
@@ -187,7 +178,8 @@ public class SqliteMarketDataStorage : IMarketDataStorage
         await EnsureInitializedAsync(ct);
 
         await using var db = await _contextFactory.CreateDbContextAsync(ct);
-        return await db.MarketData
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return await db.MarketData.Where(d => d.Date < today)
             .AsNoTracking()
             .OrderBy(d => d.Date)
             .ToListAsync(ct);
@@ -201,7 +193,8 @@ public class SqliteMarketDataStorage : IMarketDataStorage
             return await LoadAsync(ct);
 
         await using var db = await _contextFactory.CreateDbContextAsync(ct);
-        var recent = await db.MarketData
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var recent = await db.MarketData.Where(d => d.Date < today)
             .AsNoTracking()
             .OrderByDescending(d => d.Date)
             .Take(days)
@@ -211,10 +204,11 @@ public class SqliteMarketDataStorage : IMarketDataStorage
         return recent;
     }
 
-    public async Task SavePredictionAsync(MarketPrediction prediction, CancellationToken ct = default)
+    public async Task<MarketPrediction> SavePredictionAsync(MarketPrediction prediction, CancellationToken ct = default)
     {
-        if (prediction == null)
-            return;
+        ArgumentNullException.ThrowIfNull(prediction);
+        if (prediction.Date >= DateOnly.FromDateTime(DateTime.UtcNow))
+            throw new ArgumentException("A daily prediction must refer to a closed UTC candle.", nameof(prediction));
 
         await EnsureInitializedAsync(ct);
 
@@ -226,61 +220,31 @@ public class SqliteMarketDataStorage : IMarketDataStorage
 
         if (existing != null)
         {
-            existing.BtcClose = prediction.BtcClose;
-            existing.Signal = prediction.Signal;
-            existing.BullishProbability = prediction.BullishProbability;
-            existing.MarketRegime = prediction.MarketRegime;
-            existing.Confidence = prediction.Confidence;
-            existing.KeyDriversJson = driversJson;
-            existing.EnsembleJson = ensembleJson;
-
-            if (prediction.TargetPrice > 0)
-            {
-                existing.TargetPrice = prediction.TargetPrice;
-                existing.InvalidationPrice = prediction.InvalidationPrice;
-                existing.TargetChangePercent = prediction.TargetChangePercent;
-                existing.InvalidationChangePercent = prediction.InvalidationChangePercent;
-                existing.RiskRewardRatio = prediction.RiskRewardRatio;
-            }
-
-            if (!string.IsNullOrWhiteSpace(prediction.OutcomeStatus))
-            {
-                existing.OutcomeStatus = prediction.OutcomeStatus;
-                existing.RealizedReturnPercent = prediction.RealizedReturnPercent;
-                existing.ResolvedDate = prediction.ResolvedDate;
-                existing.ResolvedPrice = prediction.ResolvedPrice;
-            }
-
-            existing.CreatedAtUtc = DateTime.UtcNow;
+            _logger.LogInformation("Preserving the first issued forecast for {Date} (including legacy forecasts).", prediction.Date);
+            return MapToPrediction(existing);
         }
-        else
+        db.Predictions.Add(new MarketPredictionRecord
         {
-            db.Predictions.Add(new MarketPredictionRecord
-            {
-                Date = prediction.Date,
-                BtcClose = prediction.BtcClose,
-                Signal = prediction.Signal,
-                BullishProbability = prediction.BullishProbability,
-                MarketRegime = prediction.MarketRegime,
-                Confidence = prediction.Confidence,
-                KeyDriversJson = driversJson,
-                EnsembleJson = ensembleJson,
-                TargetPrice = prediction.TargetPrice,
-                InvalidationPrice = prediction.InvalidationPrice,
-                TargetChangePercent = prediction.TargetChangePercent,
-                InvalidationChangePercent = prediction.InvalidationChangePercent,
-                RiskRewardRatio = prediction.RiskRewardRatio,
-                OutcomeStatus = prediction.OutcomeStatus,
-                RealizedReturnPercent = prediction.RealizedReturnPercent,
-                ResolvedDate = prediction.ResolvedDate,
-                ResolvedPrice = prediction.ResolvedPrice,
-                CreatedAtUtc = DateTime.UtcNow
-            });
+            Date = prediction.Date, BtcClose = prediction.BtcClose, Signal = prediction.Signal,
+            BullishProbability = prediction.BullishProbability, MarketRegime = prediction.MarketRegime,
+            Confidence = prediction.Confidence, KeyDriversJson = driversJson, EnsembleJson = ensembleJson,
+            PredictionJson = JsonSerializer.Serialize(prediction), FeatureSnapshotJson = prediction.FeatureSnapshotJson,
+            TargetPrice = prediction.TargetPrice, InvalidationPrice = prediction.InvalidationPrice,
+            TargetChangePercent = prediction.TargetChangePercent, InvalidationChangePercent = prediction.InvalidationChangePercent,
+            RiskRewardRatio = prediction.RiskRewardRatio, OutcomeStatus = prediction.OutcomeStatus,
+            CreatedAtUtc = prediction.GeneratedAtUtc == default ? DateTime.UtcNow : prediction.GeneratedAtUtc
+        });
+        try
+        {
+            await db.SaveChangesAsync(ct);
         }
-
-        await db.SaveChangesAsync(ct);
-        _logger.LogInformation("Saved market prediction for {Date} to SQLite (Signal: {Signal}, Prob: {Prob:P1}).",
-            prediction.Date, prediction.Signal, prediction.BullishProbability);
+        catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteExtendedErrorCode: 1555 })
+        {
+            _logger.LogInformation("Another request already saved the forecast for {Date}; preserving it.", prediction.Date);
+            db.ChangeTracker.Clear();
+            return MapToPrediction(await db.Predictions.AsNoTracking().SingleAsync(p => p.Date == prediction.Date, ct));
+        }
+        return prediction;
     }
 
     public async Task<MarketPrediction?> GetLatestPredictionAsync(CancellationToken ct = default)
@@ -313,285 +277,25 @@ public class SqliteMarketDataStorage : IMarketDataStorage
     public async Task<PredictionJournalResponse> GetPredictionJournalAsync(int limit = 50, CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
-
         await using var db = await _contextFactory.CreateDbContextAsync(ct);
-
-        var predictions = await db.Predictions
-            .OrderByDescending(p => p.Date)
-            .Take(limit)
-            .ToListAsync(ct);
-
-        if (predictions.Count == 0)
-        {
-            return new PredictionJournalResponse
-            {
-                Stats = new LiveJournalStats(),
-                Items = Array.Empty<PredictionJournalItem>()
-            };
-        }
-
-        var minDate = predictions.Min(p => p.Date);
-        var allCandles = await db.MarketData
-            .AsNoTracking()
-            .Where(m => m.Date >= minDate)
-            .OrderBy(m => m.Date)
-            .ToListAsync(ct);
-
-        var latestCandle = allCandles.LastOrDefault();
-        var todayDate = latestCandle?.Date ?? DateOnly.FromDateTime(DateTime.UtcNow);
-
-        bool changesMade = false;
-        var items = new List<PredictionJournalItem>();
-
-        foreach (var pred in predictions)
-        {
-            // Ensure target and invalidation levels are present
-            decimal targetPrice = pred.TargetPrice ?? 0m;
-            decimal invalidationPrice = pred.InvalidationPrice ?? 0m;
-            decimal targetChangePct = pred.TargetChangePercent ?? 0m;
-            decimal invalidationChangePct = pred.InvalidationChangePercent ?? 0m;
-            decimal rrRatio = (pred.RiskRewardRatio ?? 0m) > 0 ? pred.RiskRewardRatio!.Value : 2.0m;
-
-            if (targetPrice <= 0 || invalidationPrice <= 0)
-            {
-                if (pred.Signal == "BEARISH_RISK")
-                {
-                    targetPrice = Math.Round(pred.BtcClose * 0.92m, 2);
-                    invalidationPrice = Math.Round(pred.BtcClose * 1.04m, 2);
-                    targetChangePct = -0.08m;
-                    invalidationChangePct = 0.04m;
-                }
-                else
-                {
-                    targetPrice = Math.Round(pred.BtcClose * 1.08m, 2);
-                    invalidationPrice = Math.Round(pred.BtcClose * 0.96m, 2);
-                    targetChangePct = 0.08m;
-                    invalidationChangePct = -0.04m;
-                }
-                pred.TargetPrice = targetPrice;
-                pred.InvalidationPrice = invalidationPrice;
-                pred.TargetChangePercent = targetChangePct;
-                pred.InvalidationChangePercent = invalidationChangePct;
-                pred.RiskRewardRatio = rrRatio;
-                changesMade = true;
-            }
-
-            int elapsedDays = todayDate.DayNumber - pred.Date.DayNumber;
-            string outcome = string.IsNullOrWhiteSpace(pred.OutcomeStatus) ? "PENDING" : pred.OutcomeStatus;
-            decimal? realizedReturn = pred.RealizedReturnPercent;
-            decimal? unrealizedReturn = null;
-            DateOnly? resolvedDate = pred.ResolvedDate;
-            decimal? resolvedPrice = pred.ResolvedPrice;
-
-            if (outcome == "PENDING")
-            {
-                var forwardCandles = allCandles
-                    .Where(c => c.Date > pred.Date && c.Date <= pred.Date.AddDays(7))
-                    .OrderBy(c => c.Date)
-                    .ToList();
-
-                bool resolved = false;
-
-                if (pred.Signal == "BULLISH_OPPORTUNITY")
-                {
-                    foreach (var c in forwardCandles)
-                    {
-                        if (c.BtcHigh >= targetPrice)
-                        {
-                            outcome = "TARGET_HIT";
-                            realizedReturn = Math.Abs(targetChangePct);
-                            resolvedDate = c.Date;
-                            resolvedPrice = targetPrice;
-                            resolved = true;
-                            break;
-                        }
-                        if (c.BtcLow <= invalidationPrice)
-                        {
-                            outcome = "INVALIDATED";
-                            realizedReturn = -Math.Abs(invalidationChangePct);
-                            resolvedDate = c.Date;
-                            resolvedPrice = invalidationPrice;
-                            resolved = true;
-                            break;
-                        }
-                    }
-
-                    if (!resolved)
-                    {
-                        if (elapsedDays >= 7 && forwardCandles.Count > 0)
-                        {
-                            var lastC = forwardCandles.Last();
-                            decimal ret = (lastC.BtcClose - pred.BtcClose) / pred.BtcClose;
-                            outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
-                            realizedReturn = Math.Round(ret, 4);
-                            resolvedDate = lastC.Date;
-                            resolvedPrice = lastC.BtcClose;
-                            resolved = true;
-                        }
-                        else if (latestCandle != null && latestCandle.Date > pred.Date)
-                        {
-                            unrealizedReturn = Math.Round((latestCandle.BtcClose - pred.BtcClose) / pred.BtcClose, 4);
-                        }
-                    }
-                }
-                else if (pred.Signal == "BEARISH_RISK")
-                {
-                    foreach (var c in forwardCandles)
-                    {
-                        if (c.BtcLow <= targetPrice)
-                        {
-                            outcome = "TARGET_HIT";
-                            realizedReturn = Math.Abs(targetChangePct);
-                            resolvedDate = c.Date;
-                            resolvedPrice = targetPrice;
-                            resolved = true;
-                            break;
-                        }
-                        if (c.BtcHigh >= invalidationPrice)
-                        {
-                            outcome = "INVALIDATED";
-                            realizedReturn = -Math.Abs(invalidationChangePct);
-                            resolvedDate = c.Date;
-                            resolvedPrice = invalidationPrice;
-                            resolved = true;
-                            break;
-                        }
-                    }
-
-                    if (!resolved)
-                    {
-                        if (elapsedDays >= 7 && forwardCandles.Count > 0)
-                        {
-                            var lastC = forwardCandles.Last();
-                            decimal ret = (pred.BtcClose - lastC.BtcClose) / pred.BtcClose;
-                            outcome = ret >= 0 ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
-                            realizedReturn = Math.Round(ret, 4);
-                            resolvedDate = lastC.Date;
-                            resolvedPrice = lastC.BtcClose;
-                            resolved = true;
-                        }
-                        else if (latestCandle != null && latestCandle.Date > pred.Date)
-                        {
-                            unrealizedReturn = Math.Round((pred.BtcClose - latestCandle.BtcClose) / pred.BtcClose, 4);
-                        }
-                    }
-                }
-                else
-                {
-                    // NEUTRAL_HOLD
-                    if (elapsedDays >= 7 && forwardCandles.Count > 0)
-                    {
-                        var lastC = forwardCandles.Last();
-                        decimal ret = (lastC.BtcClose - pred.BtcClose) / pred.BtcClose;
-                        outcome = Math.Abs(ret) <= 0.03m ? "EXPIRED_PROFIT" : "EXPIRED_LOSS";
-                        realizedReturn = Math.Round(ret, 4);
-                        resolvedDate = lastC.Date;
-                        resolvedPrice = lastC.BtcClose;
-                        resolved = true;
-                    }
-                }
-
-                if (resolved)
-                {
-                    pred.OutcomeStatus = outcome;
-                    pred.RealizedReturnPercent = realizedReturn;
-                    pred.ResolvedDate = resolvedDate;
-                    pred.ResolvedPrice = resolvedPrice;
-                    changesMade = true;
-                }
-            }
-
-            string? verdict = null;
-            decimal? agreement = null;
-            if (!string.IsNullOrWhiteSpace(pred.EnsembleJson))
-            {
-                try
-                {
-                    var ens = JsonSerializer.Deserialize<EnsembleConsensusDetails>(pred.EnsembleJson);
-                    if (ens != null)
-                    {
-                        verdict = ens.ConsensusVerdict;
-                        agreement = ens.ConsensusAgreementPercent;
-                    }
-                }
-                catch { }
-            }
-
-            items.Add(new PredictionJournalItem
-            {
-                Date = pred.Date,
-                BtcClose = pred.BtcClose,
-                Signal = pred.Signal,
-                BullishProbability = pred.BullishProbability,
-                MarketRegime = pred.MarketRegime,
-                Confidence = pred.Confidence,
-                TargetPrice = targetPrice,
-                InvalidationPrice = invalidationPrice,
-                TargetChangePercent = targetChangePct,
-                InvalidationChangePercent = invalidationChangePct,
-                RiskRewardRatio = rrRatio,
-                HorizonDays = 7,
-                ConsensusVerdict = verdict,
-                ConsensusAgreementPercent = agreement,
-                OutcomeStatus = outcome,
-                RealizedReturnPercent = realizedReturn,
-                UnrealizedReturnPercent = unrealizedReturn,
-                ResolvedDate = resolvedDate,
-                ResolvedPrice = resolvedPrice,
-                ElapsedDays = Math.Min(elapsedDays, 7)
-            });
-        }
-
-        if (changesMade)
-        {
-            await db.SaveChangesAsync(ct);
-        }
-
-        var resolvedItems = items.Where(i => i.OutcomeStatus != "PENDING").ToList();
-        int resolvedCount = resolvedItems.Count;
-        int pendingCount = items.Count - resolvedCount;
-
-        int targetHits = resolvedItems.Count(i => i.OutcomeStatus == "TARGET_HIT");
-        int invalidations = resolvedItems.Count(i => i.OutcomeStatus == "INVALIDATED");
-        int expiredProfits = resolvedItems.Count(i => i.OutcomeStatus == "EXPIRED_PROFIT");
-        int expiredLosses = resolvedItems.Count(i => i.OutcomeStatus == "EXPIRED_LOSS");
-
-        int winningTrades = targetHits + expiredProfits;
-        decimal winRate = resolvedCount > 0 ? Math.Round((decimal)winningTrades / resolvedCount * 100m, 1) : 0m;
-        decimal targetHitRate = resolvedCount > 0 ? Math.Round((decimal)targetHits / resolvedCount * 100m, 1) : 0m;
-
-        decimal totalGains = resolvedItems.Where(i => (i.RealizedReturnPercent ?? 0m) > 0).Sum(i => i.RealizedReturnPercent ?? 0m);
-        decimal totalLosses = Math.Abs(resolvedItems.Where(i => (i.RealizedReturnPercent ?? 0m) < 0).Sum(i => i.RealizedReturnPercent ?? 0m));
-
-        decimal profitFactor = totalLosses > 0 ? Math.Round(totalGains / totalLosses, 2) : (totalGains > 0 ? 99m : 1m);
-        decimal cumulativeReturn = Math.Round(resolvedItems.Sum(i => i.RealizedReturnPercent ?? 0m) * 100m, 1);
-        decimal avgReturn = resolvedCount > 0 ? Math.Round(cumulativeReturn / resolvedCount, 2) : 0m;
-
-        var stats = new LiveJournalStats
-        {
-            TotalPredictions = items.Count,
-            ResolvedPredictions = resolvedCount,
-            PendingPredictions = pendingCount,
-            TargetHits = targetHits,
-            Invalidations = invalidations,
-            ExpiredProfits = expiredProfits,
-            ExpiredLosses = expiredLosses,
-            WinRatePercent = winRate,
-            TargetHitRatePercent = targetHitRate,
-            ProfitFactor = profitFactor,
-            CumulativeReturnPercent = cumulativeReturn,
-            AverageReturnPercent = avgReturn
-        };
-
-        return new PredictionJournalResponse
-        {
-            Stats = stats,
-            Items = items
-        };
+        var records = await db.Predictions.AsNoTracking().OrderByDescending(p => p.Date).ToListAsync(ct);
+        // Legacy forecasts have different label/execution semantics. Preserve them in /history,
+        // but do not silently combine their performance with direction-v1.
+        var predictions = records.Select(MapToPrediction).Where(p => p.ModelVersion == PredictionPolicy.Version)
+            .Take(Math.Clamp(limit, 1, 1000)).ToList();
+        var candles = await LoadAsync(ct);
+        return PredictionOutcomeResolver.Journal(predictions.Select(p => PredictionOutcomeResolver.Resolve(p, candles)), "live");
     }
 
     private static MarketPrediction MapToPrediction(MarketPredictionRecord r)
     {
+
+        if (!string.IsNullOrWhiteSpace(r.PredictionJson))
+        {
+            var snapshot = JsonSerializer.Deserialize<MarketPrediction>(r.PredictionJson)
+                ?? throw new InvalidDataException("Stored prediction snapshot is invalid.");
+            return snapshot with { FeatureSnapshotJson = r.FeatureSnapshotJson };
+        }
         IReadOnlyList<string> drivers;
         try
         {
@@ -617,6 +321,8 @@ public class SqliteMarketDataStorage : IMarketDataStorage
 
         return new MarketPrediction
         {
+            ModelVersion = "legacy", PredictionStatus = "LEGACY", GeneratedAtUtc = r.CreatedAtUtc,
+            ProbabilityMeaning = "Legacy mixed barrier/return target; not comparable to direction-v1.",
             Date = r.Date,
             BtcClose = r.BtcClose,
             Signal = r.Signal,

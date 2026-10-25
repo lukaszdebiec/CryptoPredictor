@@ -71,16 +71,12 @@ public class MarketDataAggregator : IMarketDataAggregator
         var firstDate = sortedKlines.FirstOrDefault()?.Date ?? DateOnly.FromDateTime(DateTime.UtcNow);
 
         decimal lastDxy = macro.Dxy.Where(kvp => kvp.Key <= firstDate).OrderByDescending(kvp => kvp.Key).Select(kvp => kvp.Value).FirstOrDefault();
-        if (lastDxy == 0m && macro.Dxy.Count > 0) lastDxy = macro.Dxy.OrderBy(kvp => kvp.Key).First().Value;
 
         decimal lastUs10y = macro.Us10YearYield.Where(kvp => kvp.Key <= firstDate).OrderByDescending(kvp => kvp.Key).Select(kvp => kvp.Value).FirstOrDefault();
-        if (lastUs10y == 0m && macro.Us10YearYield.Count > 0) lastUs10y = macro.Us10YearYield.OrderBy(kvp => kvp.Key).First().Value;
 
         decimal lastSp500 = macro.Sp500.Where(kvp => kvp.Key <= firstDate).OrderByDescending(kvp => kvp.Key).Select(kvp => kvp.Value).FirstOrDefault();
-        if (lastSp500 == 0m && macro.Sp500.Count > 0) lastSp500 = macro.Sp500.OrderBy(kvp => kvp.Key).First().Value;
 
         decimal lastNasdaq = macro.Nasdaq.Where(kvp => kvp.Key <= firstDate).OrderByDescending(kvp => kvp.Key).Select(kvp => kvp.Value).FirstOrDefault();
-        if (lastNasdaq == 0m && macro.Nasdaq.Count > 0) lastNasdaq = macro.Nasdaq.OrderBy(kvp => kvp.Key).First().Value;
 
         foreach (var kline in sortedKlines)
         {

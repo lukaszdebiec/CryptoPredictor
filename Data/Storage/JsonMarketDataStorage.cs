@@ -48,7 +48,8 @@ public class JsonMarketDataStorage : IMarketDataStorage
         return all.TakeLast(days).ToList();
     }
 
-    public Task SavePredictionAsync(CryptoPredictor.Prediction.MarketPrediction prediction, CancellationToken ct = default) => Task.CompletedTask;
+    public Task<CryptoPredictor.Prediction.MarketPrediction> SavePredictionAsync(CryptoPredictor.Prediction.MarketPrediction prediction, CancellationToken ct = default)
+        => throw new NotSupportedException("Immutable prediction snapshots require SQLite storage.");
     public Task<CryptoPredictor.Prediction.MarketPrediction?> GetLatestPredictionAsync(CancellationToken ct = default) => Task.FromResult<CryptoPredictor.Prediction.MarketPrediction?>(null);
     public Task<IReadOnlyList<CryptoPredictor.Prediction.MarketPrediction>> GetPredictionHistoryAsync(int limit = 30, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<CryptoPredictor.Prediction.MarketPrediction>>(Array.Empty<CryptoPredictor.Prediction.MarketPrediction>());
     public Task<CryptoPredictor.Prediction.PredictionJournalResponse> GetPredictionJournalAsync(int limit = 50, CancellationToken ct = default) =>

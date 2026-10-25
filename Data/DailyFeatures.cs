@@ -2,6 +2,7 @@ namespace CryptoPredictor.Data;
 
 public sealed record DailyFeatures
 {
+    public int ConsecutivePriceDays { get; init; }
     public DateOnly Date { get; init; } // available
 
     public decimal BtcReturn1d { get; init; } // available (wyliczane z BtcClose)

@@ -134,22 +134,29 @@ public class DailyMarketDataWorker : BackgroundService
         // 3. Compute quantitative features
         var features = featureCalculator.Calculate(allData);
 
-        // 4. Retrain Multi-Model Ensemble with updated history
-        var trainingDataset = turningPointDetector.BuildTrainingDataset(allData, features, lookaheadDays: 7, bullishThreshold: 0.03m);
-        if (trainingDataset.Count >= 20)
+        // 4. Refit the directional baseline only when chronological training is possible.
+        var trainingDataset = turningPointDetector.BuildTrainingDataset(allData, features);
+        if (PredictorService.CanTrain(trainingDataset))
         {
             var metrics = predictor.TrainModel(trainingDataset);
-            _logger.LogInformation("[DailyMarketDataWorker] Multi-Model Ensemble retrained (Samples: {Count}, FastTree AUC: {FtAuc:F3}, FastForest AUC: {FfAuc:F3}, Logistic AUC: {LogAuc:F3}).",
-                metrics.TrainingSampleCount, metrics.FastTreeAuc, metrics.FastForestAuc, metrics.LogisticAuc);
+            _logger.LogInformation("[DailyMarketDataWorker] Directional model retrained: fit={Fit}, validation={Validation}, Brier={Brier:F4}, baseline={Baseline:F4}, actionable={Actionable}.",
+                metrics.TrainingSampleCount, metrics.ValidationSampleCount, metrics.BrierScore, metrics.BaselineBrierScore, metrics.PassesValidation);
         }
 
         // 5. Predict for latest closed candle
         var latestFeatures = features.Last();
         var latestMarket = allData.Last();
-        var prediction = predictor.Predict(latestFeatures, latestMarket);
+        var readyPredictor = PredictorService.PrepareForLatest(predictor, allData, features, turningPointDetector);
+        var prediction = readyPredictor.Predict(latestFeatures, latestMarket);
 
         // 6. Persist prediction in SQLite
-        await storage.SavePredictionAsync(prediction, ct);
+        var issued = await storage.SavePredictionAsync(prediction, ct);
+        if (issued?.Date != prediction.Date || issued.ModelVersion != prediction.ModelVersion)
+        {
+            _logger.LogWarning("A legacy forecast already occupies this date; it was preserved. Skipping a conflicting alert.");
+            return;
+        }
+        prediction = issued;
 
         // 7. Dispatch Telegram alert if configured
         var telegram = scope.ServiceProvider.GetRequiredService<ITelegramAlertService>();

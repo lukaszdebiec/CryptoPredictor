@@ -1,0 +1,101 @@
+{
+  "ModelVersion": "direction-v1",
+  "SnapshotSha256": "62885D31E6925C795D1FD7C42A376A169C145880C9A6C4B33CA7953274B38332",
+  "FirstDate": "2026-03-25",
+  "LastDate": "2026-10-24",
+  "ClosedObservations": 214,
+  "Signals": {
+    "NEUTRAL_HOLD": 155
+  },
+  "Statuses": {
+    "INSUFFICIENT_DATA": 106,
+    "VALIDATION_FAILED": 39,
+    "MODEL_ESTIMATE": 10
+  },
+  "ModelDirection": {
+    "Count": 42,
+    "Correct": 22,
+    "AlwaysUpCorrect": 19,
+    "BrierScore": 0.27670041169983334
+  },
+  "ActiveSignalJournal": {
+    "NoTradePredictions": 155,
+    "UnavailableOutcomes": 0,
+    "DirectionEvaluatedCount": 0,
+    "DirectionAccuracyPercent": null,
+    "AlwaysUpAccuracyPercent": null,
+    "ProfitFactorValue": null,
+    "TotalPredictions": 155,
+    "ResolvedPredictions": 0,
+    "PendingPredictions": 0,
+    "TargetHits": 0,
+    "Invalidations": 0,
+    "ExpiredProfits": 0,
+    "ExpiredLosses": 0,
+    "WinRatePercent": 0,
+    "TargetHitRatePercent": 0,
+    "ProfitFactor": 0,
+    "CumulativeReturnPercent": 0,
+    "AverageReturnPercent": 0
+  },
+  "Portfolio": {
+    "ModelVersion": "direction-v1",
+    "EvaluationStart": "2026-09-06",
+    "EvaluationEnd": "2026-10-24",
+    "ProfitFactorValue": null,
+    "Assumptions": [
+      "Daily expanding-window retraining with only matured 7-day labels; chronological purged validation.",
+      "One unlevered paper position at a time; close-price entry and daily mark-to-market drawdown/Sharpe.",
+      "Costs per side: fee 0.050 %, slippage 0.050 %. Short borrow/funding is excluded.",
+      "Stop first when both barriers occur in one daily candle. Adverse opening gaps fill at the open.",
+      "Open positions are explicitly liquidated at the final data close (END_OF_DATA). No portfolio CAGR is inferred from the overlapping signal journal."
+    ],
+    "InitialCapital": 10000,
+    "FinalCapital": 10000,
+    "StrategyTotalReturnPercent": 0,
+    "BuyAndHoldReturnPercent": 0.5181274470231963205707581100,
+    "TotalTrades": 0,
+    "WinningTrades": 0,
+    "LosingTrades": 0,
+    "WinRatePercent": 0,
+    "ProfitFactor": 0,
+    "StrategyMaxDrawdownPercent": 0,
+    "BuyAndHoldMaxDrawdownPercent": 6.583794014864944736686565400,
+    "SharpeRatio": 0,
+    "Trades": []
+  },
+  "LatestValidation": {
+    "Accuracy": 0.43333333333333335,
+    "AreaUnderRocCurve": 0.5555555555555556,
+    "F1Score": 0.45161290322580644,
+    "PositivePrecision": 0.3684210526315789,
+    "PositiveRecall": 0.5833333333333334,
+    "TrainingSampleCount": 111,
+    "FastTreeAuc": null,
+    "FastForestAuc": null,
+    "LogisticAuc": 0.5555555555555556,
+    "ValidationSampleCount": 30,
+    "RefitSampleCount": 148,
+    "TrainingDataFingerprint": "E5DD1D3602B73BDA4258FC370AA4F6D6847B587BCE89E6E4D54F00FAB37A69FD",
+    "BrierScore": 0.2601999156503409,
+    "LogLoss": 0.7204976046846927,
+    "BaselineBrierScore": 0.246002759516273,
+    "BaselineLogLoss": 0.6851476295636338,
+    "AlwaysUpAccuracy": 0.4,
+    "MajorityBaselineAccuracy": 0.6,
+    "PassesValidation": false,
+    "TrainingStart": "2026-05-23",
+    "TrainingEnd": "2026-09-10",
+    "TrainingOutcomeEnd": "2026-09-17",
+    "ValidationStart": "2026-09-18",
+    "ValidationEnd": "2026-10-17",
+    "DataThroughDate": "2026-10-24",
+    "ModelVersion": "direction-v1"
+  },
+  "Limitations": [
+    "Previously inspected sample; not an untouched final holdout.",
+    "Daily label windows overlap. Raw directional estimates include days on which the validation gate abstains from trading.",
+    "Ledger sums are not portfolio returns. Cost and execution assumptions are in Portfolio.Assumptions.",
+    "No guarantee of calibrated probabilities or future predictive advantage."
+  ]
+}

@@ -29,6 +29,9 @@ public sealed record LabeledMarketDay
 public sealed record ModelTrainingSample
 {
     public DateOnly Date { get; init; }
+    public DateOnly OutcomeDate { get; init; }
+    public int HorizonDays { get; init; } = 7;
+    public decimal ForwardReturn { get; init; }
     public DailyFeatures Features { get; init; } = default!;
     public LabeledMarketDay Label { get; init; } = default!;
 }

@@ -10,6 +10,8 @@ public class MarketPredictionRecord
     public string Confidence { get; set; } = default!;
     public string KeyDriversJson { get; set; } = "[]";
     public string? EnsembleJson { get; set; }
+    public string? PredictionJson { get; set; }
+    public string? FeatureSnapshotJson { get; set; }
 
     public decimal? TargetPrice { get; set; }
     public decimal? InvalidationPrice { get; set; }

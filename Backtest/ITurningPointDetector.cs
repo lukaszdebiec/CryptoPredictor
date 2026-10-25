@@ -16,5 +16,5 @@ public interface ITurningPointDetector
         IReadOnlyList<DailyMarketData> data,
         IReadOnlyList<DailyFeatures> features,
         int lookaheadDays = 7,
-        decimal bullishThreshold = 0.03m);
+        decimal bullishThreshold = 0m);
 }
