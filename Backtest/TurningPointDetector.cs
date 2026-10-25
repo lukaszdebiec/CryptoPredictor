@@ -86,6 +86,34 @@ public class TurningPointDetector : ITurningPointDetector
                 }
             }
 
+            // 3. Triple-Barrier Quant Labeling: Does price hit +6.5% TP before -4.5% SL within 7 days?
+            bool? isTripleBarrierBullish = null;
+            if (i + 7 < n && current.BtcClose > 0)
+            {
+                decimal tpPrice = current.BtcClose * 1.065m;
+                decimal slPrice = current.BtcClose * 0.955m;
+                bool tpHit = false;
+                bool slHit = false;
+
+                for (int k = i + 1; k <= i + 7; k++)
+                {
+                    if (sorted[k].BtcHigh >= tpPrice)
+                    {
+                        tpHit = true;
+                        break;
+                    }
+                    if (sorted[k].BtcLow <= slPrice)
+                    {
+                        slHit = true;
+                        break;
+                    }
+                }
+
+                if (tpHit) isTripleBarrierBullish = true;
+                else if (slHit) isTripleBarrierBullish = false;
+                else isTripleBarrierBullish = ret7d.HasValue && ret7d.Value > 0.015m;
+            }
+
             results.Add(new LabeledMarketDay
             {
                 Date = current.Date,
@@ -94,7 +122,8 @@ public class TurningPointDetector : ITurningPointDetector
                 ForwardReturn3d = ret3d,
                 ForwardReturn7d = ret7d,
                 ForwardReturn14d = ret14d,
-                IsForward7dBullish = isBullish7d
+                IsForward7dBullish = isBullish7d,
+                IsTripleBarrierBullish = isTripleBarrierBullish
             });
         }
 

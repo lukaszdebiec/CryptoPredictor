@@ -23,6 +23,7 @@ public sealed record LabeledMarketDay
     public decimal? ForwardReturn14d { get; init; }
 
     public bool? IsForward7dBullish { get; init; }
+    public bool? IsTripleBarrierBullish { get; init; }
 }
 
 public sealed record ModelTrainingSample

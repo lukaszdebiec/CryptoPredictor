@@ -61,7 +61,7 @@ public class PredictorService : IPredictorService
             IsShortLiquiditySwept = s.Features.IsShortLiquiditySwept ? 1f : 0f,
             FearGreedIndex = s.Label.IsLocalBottom ? 20f : 50f,
             CoinbasePremium = 0f,
-            Label = s.Label.IsForward7dBullish ?? (s.Label.ForwardReturn7d > 0.02m)
+            Label = s.Label.IsTripleBarrierBullish ?? s.Label.IsForward7dBullish ?? (s.Label.ForwardReturn7d > 0.02m)
         }).ToList();
 
         var dataView = _mlContext.Data.LoadFromEnumerable(inputs);
@@ -431,6 +431,54 @@ public class PredictorService : IPredictorService
         if (drivers.Count == 0)
             drivers.Add("Indicators are near baseline neutral conditions.");
 
+        // --- 4 CARDINAL QUANT ALPHA ENGINE GATES ---
+        // 1. Extreme Greed Euphoria Climax: Invert top FOMO into Reversal Short
+        bool isEuphoriaClimax = (todayMarket.FearGreedIndex >= 72 || 
+            (todayFeatures.BtcReturn7d > 0.10m && todayMarket.FearGreedIndex >= 65) || 
+            (todayFeatures.IsShortLiquiditySwept && todayFeatures.BtcReturn7d > 0.04m));
+
+        // 2. Extreme Fear Capitulation: Invert panic dumping into Reversal Long
+        bool isCapitulationBottom = (todayMarket.FearGreedIndex <= 24 || 
+            todayFeatures.FundingZScore30d <= -1.2m || 
+            (todayFeatures.IsLongLiquiditySwept && todayFeatures.BtcReturn7d < -0.04m));
+
+        // 3. Falling Knife: Strong bearish impulse without reversal confirmation
+        bool isFallingKnife = todayFeatures.BtcReturn7d < -0.08m && todayFeatures.KaufmanEfficiencyRatio10d > 0.60m && !todayFeatures.IsLongLiquiditySwept;
+
+        // 4. Low Efficiency Chop: Sideways noise with low net displacement
+        bool isChop = todayFeatures.KaufmanEfficiencyRatio10d < 0.28m && !todayFeatures.IsLongLiquiditySwept && !todayFeatures.IsShortLiquiditySwept;
+
+        if (isFallingKnife)
+        {
+            probability = 0.50f;
+            drivers.Insert(0, $"Falling Knife Gate: Severe downward impulse (KER: {todayFeatures.KaufmanEfficiencyRatio10d:F2}, 7d: {todayFeatures.BtcReturn7d:P1}) without Wyckoff Spring confirmation. Quant Engine mandates Cash Hold.");
+        }
+        else if (isEuphoriaClimax)
+        {
+            probability = 0.28f; // Reversal short
+            drivers.Insert(0, $"Euphoria Climax Reversal Gate: Extreme Greed (F&G: {todayMarket.FearGreedIndex}) / momentum extension (+{todayFeatures.BtcReturn7d:P1} 7d) warns of local distribution top. Model inverts FOMO continuation into tactical distribution short.");
+        }
+        else if (isCapitulationBottom)
+        {
+            probability = 0.76f; // Reversal long
+            drivers.Insert(0, $"Capitulation Bottom Reversal Gate: Extreme Fear (F&G: {todayMarket.FearGreedIndex}) / negative funding (Z: {todayFeatures.FundingZScore30d:F2}) indicates peak short crowding. Model inverts panic into high-expectancy accumulation bounce.");
+        }
+        else if (isChop)
+        {
+            probability = 0.50f;
+            drivers.Insert(0, $"Consolidation Chop Gate: Kaufman Efficiency Ratio ({todayFeatures.KaufmanEfficiencyRatio10d:F2}) confirms choppy sideways range. Model mandates Neutral Cash Hold to eliminate whipsaw stop-outs.");
+        }
+        else if (probability >= 0.65f && (todayMarket.FearGreedIndex >= 68 || todayFeatures.FundingZScore30d > 1.6m))
+        {
+            probability = 0.50f;
+            drivers.Insert(0, $"Cardinal Rule of Greed: Bullish continuation suppressed due to elevated sentiment (F&G: {todayMarket.FearGreedIndex}) or crowded leverage funding (Z: {todayFeatures.FundingZScore30d:F2}).");
+        }
+        else if (probability <= 0.35f && (todayMarket.FearGreedIndex <= 32 || todayFeatures.FundingZScore30d < -0.8m))
+        {
+            probability = 0.50f;
+            drivers.Insert(0, $"Cardinal Rule of Fear: Bearish shorting suppressed due to terrified sentiment (F&G: {todayMarket.FearGreedIndex}) or negative funding squeeze risk (Z: {todayFeatures.FundingZScore30d:F2}).");
+        }
+
         string signal;
         string regime;
         string confidence;
@@ -438,19 +486,19 @@ public class PredictorService : IPredictorService
         if (probability >= 0.65f)
         {
             signal = "BULLISH_OPPORTUNITY";
-            regime = "HighProbabilityBottom / Accumulation";
+            regime = isCapitulationBottom ? "Capitulation Spring / Accumulation" : "HighProbabilityBottom / Accumulation";
             confidence = probability >= 0.75f ? "High" : "Moderate";
         }
         else if (probability <= 0.35f)
         {
             signal = "BEARISH_RISK";
-            regime = "Overextended / Distribution";
+            regime = isEuphoriaClimax ? "Euphoria Climax / Distribution" : "Overextended / Distribution";
             confidence = probability <= 0.25f ? "High" : "Moderate";
         }
         else
         {
             signal = "NEUTRAL_HOLD";
-            regime = "Consolidation / Chop";
+            regime = isChop ? "Consolidation / Chop" : (isFallingKnife ? "Falling Knife / Capital Preservation" : "Neutral / Wait");
             confidence = "Neutral";
         }
 
@@ -510,38 +558,40 @@ public class PredictorService : IPredictorService
             volAnnual = 0.50m;
         }
 
-        // Daily standard deviation
+        // Daily standard deviation & 7-day expected volatility
         decimal volDaily = volAnnual / (decimal)Math.Sqrt(365);
+        decimal sigma7d = volDaily * (decimal)Math.Sqrt(7);
 
-        // 2. Determine target & invalidation percentages based on signal & liquidity walls
+        // 2. Determine volatility-adaptive target & invalidation percentages
+        decimal dynamicSl = Math.Clamp(sigma7d * 0.65m, 0.045m, 0.065m);
         decimal targetPct;
         decimal invalidationPct;
         decimal driftDaily;
 
         if (signal == "BULLISH_OPPORTUNITY")
         {
-            // Base target: +8% (or Upper Liquidation Wall if 5%-14% away)
-            targetPct = (distToUpperLiqWall >= 5m && distToUpperLiqWall <= 14m)
-                ? distToUpperLiqWall / 100m
-                : 0.08m;
-            // Invalidation: -4% (or just below Lower Liquidation Wall)
-            invalidationPct = (distToLowerLiqWall >= 2.5m && distToLowerLiqWall <= 6m)
-                ? (distToLowerLiqWall + 0.5m) / 100m
-                : 0.04m;
+            if (distToLowerLiqWall >= 2.5m && distToLowerLiqWall <= 6.5m)
+                dynamicSl = Math.Max(dynamicSl, (distToLowerLiqWall + 0.5m) / 100m);
 
+            invalidationPct = dynamicSl;
+            decimal dynamicTp = dynamicSl * 1.85m; // Strict positive expectancy (R:R ~ 1.85x - 2.0x)
+            if (distToUpperLiqWall >= 5.0m && distToUpperLiqWall <= 14.0m)
+                dynamicTp = Math.Max(dynamicTp, distToUpperLiqWall / 100m);
+
+            targetPct = dynamicTp;
             driftDaily = targetPct / 7m;
         }
         else if (signal == "BEARISH_RISK")
         {
-            // Downside target: -8% (or Lower Liquidation Wall if 4%-14% away)
-            targetPct = (distToLowerLiqWall >= 4m && distToLowerLiqWall <= 14m)
-                ? distToLowerLiqWall / 100m
-                : 0.08m;
-            // Upside invalidation: +4% (or just above Upper Liquidation Wall)
-            invalidationPct = (distToUpperLiqWall >= 2.5m && distToUpperLiqWall <= 6m)
-                ? (distToUpperLiqWall + 0.5m) / 100m
-                : 0.04m;
+            if (distToUpperLiqWall >= 2.5m && distToUpperLiqWall <= 6.5m)
+                dynamicSl = Math.Max(dynamicSl, (distToUpperLiqWall + 0.5m) / 100m);
 
+            invalidationPct = dynamicSl;
+            decimal dynamicTp = dynamicSl * 1.85m;
+            if (distToLowerLiqWall >= 5.0m && distToLowerLiqWall <= 14.0m)
+                dynamicTp = Math.Max(dynamicTp, distToLowerLiqWall / 100m);
+
+            targetPct = dynamicTp;
             driftDaily = -targetPct / 7m;
         }
         else
@@ -626,9 +676,14 @@ public class PredictorService : IPredictorService
         if (feat.EtfFlow7d > 300_000_000m) score += 0.05f;
         else if (feat.EtfFlow7d < -300_000_000m) score -= 0.05f;
 
-        // Extreme fear
-        if (market.FearGreedIndex < 25) score += 0.10f;
-        else if (market.FearGreedIndex > 75) score -= 0.10f;
+        // Extreme fear & capitulation spring vs Extreme greed & euphoria climax
+        if (market.FearGreedIndex <= 20) score += 0.20f;
+        else if (market.FearGreedIndex <= 28) score += 0.12f;
+        else if (market.FearGreedIndex >= 78) score -= 0.20f;
+        else if (market.FearGreedIndex >= 70) score -= 0.12f;
+
+        if (feat.BtcReturn7d > 0.12m) score -= 0.14f;
+        else if (feat.BtcReturn7d < -0.12m) score += 0.14f;
 
         // Global Macro Dynamics (Liquidity, Currency, & Equities)
         if (feat.DxyZScore30d < -1.0m) score += 0.06f;
