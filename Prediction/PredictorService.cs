@@ -595,41 +595,46 @@ public class PredictorService : IPredictorService
         decimal sigma7d = volDaily * (decimal)Math.Sqrt(7);
 
         // 2. Determine volatility-adaptive target & invalidation percentages
-        decimal dynamicSl = Math.Clamp(sigma7d * 0.65m, 0.045m, 0.065m);
+        // TP1 Concept: Target reflects First Resistance / Support Level Test (3.2% - 4.8% or nearest Liquidity Wall)
+        decimal dynamicSl = Math.Clamp(sigma7d * 0.65m, 0.045m, 0.060m);
         decimal targetPct;
         decimal invalidationPct;
         decimal driftDaily;
 
         if (signal == "BULLISH_OPPORTUNITY")
         {
-            if (distToLowerLiqWall >= 2.5m && distToLowerLiqWall <= 6.5m)
+            if (distToLowerLiqWall >= 2.5m && distToLowerLiqWall <= 5.5m)
                 dynamicSl = Math.Max(dynamicSl, (distToLowerLiqWall + 0.5m) / 100m);
 
             invalidationPct = dynamicSl;
-            decimal dynamicTp = dynamicSl * 1.85m; // Strict positive expectancy (R:R ~ 1.85x - 2.0x)
-            if (distToUpperLiqWall >= 5.0m && distToUpperLiqWall <= 14.0m)
-                dynamicTp = Math.Max(dynamicTp, distToUpperLiqWall / 100m);
 
-            targetPct = dynamicTp;
+            // TP1: Test of nearest overhead resistance / Upper Liquidity Wall
+            decimal levelTestTp = Math.Clamp(sigma7d * 0.50m, 0.034m, 0.048m);
+            if (distToUpperLiqWall >= 2.5m && distToUpperLiqWall <= 6.0m)
+                levelTestTp = distToUpperLiqWall / 100m;
+
+            targetPct = levelTestTp;
             driftDaily = targetPct / 7m;
         }
         else if (signal == "BEARISH_RISK")
         {
-            if (distToUpperLiqWall >= 2.5m && distToUpperLiqWall <= 6.5m)
+            if (distToUpperLiqWall >= 2.5m && distToUpperLiqWall <= 5.5m)
                 dynamicSl = Math.Max(dynamicSl, (distToUpperLiqWall + 0.5m) / 100m);
 
             invalidationPct = dynamicSl;
-            decimal dynamicTp = dynamicSl * 1.85m;
-            if (distToLowerLiqWall >= 5.0m && distToLowerLiqWall <= 14.0m)
-                dynamicTp = Math.Max(dynamicTp, distToLowerLiqWall / 100m);
 
-            targetPct = dynamicTp;
+            // TP1: Test of nearest downside support / Lower Liquidity Wall
+            decimal levelTestTp = Math.Clamp(sigma7d * 0.50m, 0.034m, 0.048m);
+            if (distToLowerLiqWall >= 2.5m && distToLowerLiqWall <= 6.0m)
+                levelTestTp = distToLowerLiqWall / 100m;
+
+            targetPct = levelTestTp;
             driftDaily = -targetPct / 7m;
         }
         else
         {
-            targetPct = 0.04m;
-            invalidationPct = 0.04m;
+            targetPct = 0.035m;
+            invalidationPct = 0.045m;
             driftDaily = (bullishProbability - 0.50m) * 0.04m / 7m;
         }
 
