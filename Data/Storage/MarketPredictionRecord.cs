@@ -9,5 +9,6 @@ public class MarketPredictionRecord
     public string MarketRegime { get; set; } = default!;
     public string Confidence { get; set; } = default!;
     public string KeyDriversJson { get; set; } = "[]";
+    public string? EnsembleJson { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }

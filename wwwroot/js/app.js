@@ -948,6 +948,62 @@
         }
       }
 
+      // Render Ensemble Council Breakdown
+      const badgeConsensus = document.getElementById('badge-consensus');
+      const ensembleBox = document.getElementById('ensemble-council-breakdown');
+      const ensembleVerdictText = document.getElementById('ensemble-verdict-text');
+      const ensembleVotesList = document.getElementById('ensemble-votes-list');
+
+      if (pred.ensemble) {
+        const ens = pred.ensemble;
+        if (badgeConsensus) {
+          badgeConsensus.style.display = 'inline-block';
+          const agreement = Math.round(Number(ens.consensusAgreementPercent));
+          badgeConsensus.innerText = `${agreement}% Agree`;
+
+          let tagClass = 'consensus-tag';
+          if (ens.consensusVerdict.includes('Unanimous')) tagClass += ' unanimous';
+          else if (ens.consensusVerdict.includes('Strong')) tagClass += ' strong';
+          else if (ens.consensusVerdict.includes('Moderate')) tagClass += ' moderate';
+          else tagClass += ' divided';
+
+          badgeConsensus.className = tagClass;
+          badgeConsensus.title = `Consensus Verdict: ${ens.consensusVerdict} (${agreement}% Agreement across 4 models)`;
+        }
+
+        if (ensembleBox && ensembleVotesList) {
+          ensembleBox.style.display = 'block';
+          if (ensembleVerdictText) {
+            ensembleVerdictText.innerText = ens.consensusVerdict;
+          }
+
+          if (ens.votes && ens.votes.length > 0) {
+            ensembleVotesList.innerHTML = ens.votes.map(v => {
+              const p = Math.round(Number(v.probability) * 100);
+              const w = Math.round(Number(v.weight) * 100);
+              const isBull = v.signal === 'BULLISH';
+              const isBear = v.signal === 'BEARISH';
+              const fillClass = isBull ? 'bullish' : (isBear ? 'bearish' : 'neutral');
+              const probColor = isBull ? '#34d399' : (isBear ? '#fb7185' : '#94a3b8');
+
+              return `
+                <div class="ensemble-vote-row">
+                  <span class="ens-model-badge" title="${escapeHtml(v.modelFamily)}">${escapeHtml(v.modelName)}</span>
+                  <div class="ens-bar-track">
+                    <div class="ens-bar-fill ${fillClass}" style="width: ${p}%;"></div>
+                  </div>
+                  <span class="ens-vote-prob" style="color: ${probColor};">${p}%</span>
+                  <span class="ens-vote-weight" title="Dynamic Regime Weight">w:${w}%</span>
+                </div>
+              `;
+            }).join('');
+          }
+        }
+      } else {
+        if (badgeConsensus) badgeConsensus.style.display = 'none';
+        if (ensembleBox) ensembleBox.style.display = 'none';
+      }
+
       // Macro cards
       loadMacroCards();
 

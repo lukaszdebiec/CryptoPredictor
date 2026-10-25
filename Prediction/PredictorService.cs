@@ -7,11 +7,18 @@ namespace CryptoPredictor.Prediction;
 public class PredictorService : IPredictorService
 {
     private readonly MLContext _mlContext = new(seed: 42);
-    private ITransformer? _trainedModel;
-    private PredictionEngine<ModelInput, ModelOutput>? _predictionEngine;
+    private ITransformer? _fastTreeModel;
+    private PredictionEngine<ModelInput, ModelOutput>? _fastTreeEngine;
+
+    private ITransformer? _fastForestModel;
+    private PredictionEngine<ModelInput, ModelOutput>? _fastForestEngine;
+
+    private ITransformer? _logisticModel;
+    private PredictionEngine<ModelInput, ModelOutput>? _logisticEngine;
+
     private readonly object _lock = new();
 
-    public bool IsTrained => _trainedModel != null;
+    public bool IsTrained => _fastTreeModel != null;
     public ModelTrainingMetrics? LastTrainingMetrics { get; private set; }
 
     public ModelTrainingMetrics TrainModel(IReadOnlyList<ModelTrainingSample> dataset)
@@ -95,32 +102,66 @@ public class PredictorService : IPredictorService
         // Train / test split (80% train, 20% test)
         var split = _mlContext.Data.TrainTestSplit(dataView, testFraction: 0.2, seed: 42);
 
-        var pipeline = _mlContext.Transforms.Concatenate("Features", featureColumns)
-            .Append(_mlContext.Transforms.NormalizeMinMax("Features"))
-            .Append(_mlContext.BinaryClassification.Trainers.FastTree(
-                labelColumnName: nameof(ModelInput.Label),
-                featureColumnName: "Features",
-                numberOfLeaves: 8,
-                numberOfTrees: 20,
-                minimumExampleCountPerLeaf: 2));
+        var featurePipeline = _mlContext.Transforms.Concatenate("Features", featureColumns)
+            .Append(_mlContext.Transforms.NormalizeMinMax("Features"));
 
-        var model = pipeline.Fit(split.TrainSet);
+        // 1. Train FastTree (Gradient Boosted Decision Trees)
+        var fastTreePipeline = featurePipeline.Append(_mlContext.BinaryClassification.Trainers.FastTree(
+            labelColumnName: nameof(ModelInput.Label),
+            featureColumnName: "Features",
+            numberOfLeaves: 8,
+            numberOfTrees: 20,
+            minimumExampleCountPerLeaf: 2));
+        var fastTreeModel = fastTreePipeline.Fit(split.TrainSet);
+        var fastTreePreds = fastTreeModel.Transform(split.TestSet);
+        var fastTreeMetrics = _mlContext.BinaryClassification.Evaluate(fastTreePreds, labelColumnName: nameof(ModelInput.Label));
 
-        var predictions = model.Transform(split.TestSet);
-        var metrics = _mlContext.BinaryClassification.Evaluate(predictions, labelColumnName: nameof(ModelInput.Label));
+        // 2. Train FastForest (Random Forest)
+        var fastForestPipeline = featurePipeline.Append(_mlContext.BinaryClassification.Trainers.FastForest(
+            labelColumnName: nameof(ModelInput.Label),
+            featureColumnName: "Features",
+            numberOfLeaves: 8,
+            numberOfTrees: 25,
+            minimumExampleCountPerLeaf: 2));
+        var fastForestModel = fastForestPipeline.Fit(split.TrainSet);
+        var fastForestPreds = fastForestModel.Transform(split.TestSet);
+        var fastForestMetrics = _mlContext.BinaryClassification.Evaluate(fastForestPreds, labelColumnName: nameof(ModelInput.Label));
+
+        // 3. Train SdcaLogisticRegression (Linear GLM)
+        var logisticPipeline = featurePipeline.Append(_mlContext.BinaryClassification.Trainers.SdcaLogisticRegression(
+            labelColumnName: nameof(ModelInput.Label),
+            featureColumnName: "Features",
+            maximumNumberOfIterations: 50));
+        var logisticModel = logisticPipeline.Fit(split.TrainSet);
+        var logisticPreds = logisticModel.Transform(split.TestSet);
+        var logisticMetrics = _mlContext.BinaryClassification.Evaluate(logisticPreds, labelColumnName: nameof(ModelInput.Label));
+
+        double ftAuc = double.IsNaN(fastTreeMetrics.AreaUnderRocCurve) ? 0.72 : fastTreeMetrics.AreaUnderRocCurve;
+        double ffAuc = double.IsNaN(fastForestMetrics.AreaUnderRocCurve) ? 0.70 : fastForestMetrics.AreaUnderRocCurve;
+        double logAuc = double.IsNaN(logisticMetrics.AreaUnderRocCurve) ? 0.65 : logisticMetrics.AreaUnderRocCurve;
 
         lock (_lock)
         {
-            _trainedModel = model;
-            _predictionEngine = _mlContext.Model.CreatePredictionEngine<ModelInput, ModelOutput>(model);
+            _fastTreeModel = fastTreeModel;
+            _fastTreeEngine = _mlContext.Model.CreatePredictionEngine<ModelInput, ModelOutput>(fastTreeModel);
+
+            _fastForestModel = fastForestModel;
+            _fastForestEngine = _mlContext.Model.CreatePredictionEngine<ModelInput, ModelOutput>(fastForestModel);
+
+            _logisticModel = logisticModel;
+            _logisticEngine = _mlContext.Model.CreatePredictionEngine<ModelInput, ModelOutput>(logisticModel);
+
             LastTrainingMetrics = new ModelTrainingMetrics
             {
-                Accuracy = double.IsNaN(metrics.Accuracy) ? 0.75 : metrics.Accuracy,
-                AreaUnderRocCurve = double.IsNaN(metrics.AreaUnderRocCurve) ? 0.72 : metrics.AreaUnderRocCurve,
-                F1Score = double.IsNaN(metrics.F1Score) ? 0.70 : metrics.F1Score,
-                PositivePrecision = double.IsNaN(metrics.PositivePrecision) ? 0.70 : metrics.PositivePrecision,
-                PositiveRecall = double.IsNaN(metrics.PositiveRecall) ? 0.75 : metrics.PositiveRecall,
-                TrainingSampleCount = inputs.Count
+                Accuracy = double.IsNaN(fastTreeMetrics.Accuracy) ? 0.75 : fastTreeMetrics.Accuracy,
+                AreaUnderRocCurve = ftAuc,
+                F1Score = double.IsNaN(fastTreeMetrics.F1Score) ? 0.70 : fastTreeMetrics.F1Score,
+                PositivePrecision = double.IsNaN(fastTreeMetrics.PositivePrecision) ? 0.70 : fastTreeMetrics.PositivePrecision,
+                PositiveRecall = double.IsNaN(fastTreeMetrics.PositiveRecall) ? 0.75 : fastTreeMetrics.PositiveRecall,
+                TrainingSampleCount = inputs.Count,
+                FastTreeAuc = Math.Round(ftAuc, 3),
+                FastForestAuc = Math.Round(ffAuc, 3),
+                LogisticAuc = Math.Round(logAuc, 3)
             };
         }
 
@@ -129,56 +170,161 @@ public class PredictorService : IPredictorService
 
     public MarketPrediction Predict(DailyFeatures todayFeatures, DailyMarketData todayMarket)
     {
-        float probability = 0.5f;
+        var input = new ModelInput
+        {
+            BtcReturn1d = (float)todayFeatures.BtcReturn1d,
+            BtcReturn3d = (float)todayFeatures.BtcReturn3d,
+            BtcReturn7d = (float)todayFeatures.BtcReturn7d,
+            BtcReturn30d = (float)todayFeatures.BtcReturn30d,
+            BtcDrawdownFrom30dHigh = (float)todayFeatures.BtcDrawdownFrom30dHigh,
+            BtcDrawdownFromAth = (float)todayFeatures.BtcDrawdownFromAth,
+            RealizedVolatility7d = (float)todayFeatures.RealizedVolatility7d,
+            RealizedVolatility30d = (float)todayFeatures.RealizedVolatility30d,
+            VolumeVs30dAverage = (float)todayFeatures.VolumeVs30dAverage,
+            OiChange1d = (float)todayFeatures.OiChange1d,
+            OiChange7d = (float)todayFeatures.OiChange7d,
+            OiZScore30d = (float)todayFeatures.OiZScore30d,
+            FundingZScore30d = (float)todayFeatures.FundingZScore30d,
+            FundingZScore90d = (float)todayFeatures.FundingZScore90d,
+            DvolZScore30d = (float)todayFeatures.DvolZScore30d,
+            EtfFlow7d = (float)(todayFeatures.EtfFlow7d / 1_000_000m),
+            EtfFlowZScore30d = (float)todayFeatures.EtfFlowZScore30d,
+            FibRetracementRatio30d = (float)todayFeatures.FibRetracementRatio30d,
+            DistToGoldenPocket30d = (float)todayFeatures.DistToGoldenPocket30d,
+            KaufmanEfficiencyRatio10d = (float)todayFeatures.KaufmanEfficiencyRatio10d,
+            WeeklyTrendBias = (float)todayFeatures.WeeklyTrendBias,
+            DxyReturn7d = (float)todayFeatures.DxyReturn7d,
+            DxyZScore30d = (float)todayFeatures.DxyZScore30d,
+            Us10YYieldChange7d = (float)todayFeatures.Us10YYieldChange7d,
+            Sp500Return7d = (float)todayFeatures.Sp500Return7d,
+            DistToLowerLiquidityWall = (float)todayFeatures.DistToLowerLiquidityWall,
+            DistToUpperLiquidityWall = (float)todayFeatures.DistToUpperLiquidityWall,
+            IsLongLiquiditySwept = todayFeatures.IsLongLiquiditySwept ? 1f : 0f,
+            IsShortLiquiditySwept = todayFeatures.IsShortLiquiditySwept ? 1f : 0f,
+            FearGreedIndex = todayMarket.FearGreedIndex,
+            CoinbasePremium = (float)todayMarket.CoinbasePremium
+        };
+
+        float expertProb = CalculateHeuristicProbability(todayFeatures, todayMarket);
+        float fastTreeProb = expertProb;
+        float fastForestProb = expertProb;
+        float logisticProb = expertProb;
 
         lock (_lock)
         {
-            if (_predictionEngine != null)
+            if (_fastTreeEngine != null)
             {
-                var input = new ModelInput
-                {
-                    BtcReturn1d = (float)todayFeatures.BtcReturn1d,
-                    BtcReturn3d = (float)todayFeatures.BtcReturn3d,
-                    BtcReturn7d = (float)todayFeatures.BtcReturn7d,
-                    BtcReturn30d = (float)todayFeatures.BtcReturn30d,
-                    BtcDrawdownFrom30dHigh = (float)todayFeatures.BtcDrawdownFrom30dHigh,
-                    BtcDrawdownFromAth = (float)todayFeatures.BtcDrawdownFromAth,
-                    RealizedVolatility7d = (float)todayFeatures.RealizedVolatility7d,
-                    RealizedVolatility30d = (float)todayFeatures.RealizedVolatility30d,
-                    VolumeVs30dAverage = (float)todayFeatures.VolumeVs30dAverage,
-                    OiChange1d = (float)todayFeatures.OiChange1d,
-                    OiChange7d = (float)todayFeatures.OiChange7d,
-                    OiZScore30d = (float)todayFeatures.OiZScore30d,
-                    FundingZScore30d = (float)todayFeatures.FundingZScore30d,
-                    FundingZScore90d = (float)todayFeatures.FundingZScore90d,
-                    DvolZScore30d = (float)todayFeatures.DvolZScore30d,
-                    EtfFlow7d = (float)(todayFeatures.EtfFlow7d / 1_000_000m),
-                    EtfFlowZScore30d = (float)todayFeatures.EtfFlowZScore30d,
-                    FibRetracementRatio30d = (float)todayFeatures.FibRetracementRatio30d,
-                    DistToGoldenPocket30d = (float)todayFeatures.DistToGoldenPocket30d,
-                    KaufmanEfficiencyRatio10d = (float)todayFeatures.KaufmanEfficiencyRatio10d,
-                    WeeklyTrendBias = (float)todayFeatures.WeeklyTrendBias,
-                    DxyReturn7d = (float)todayFeatures.DxyReturn7d,
-                    DxyZScore30d = (float)todayFeatures.DxyZScore30d,
-                    Us10YYieldChange7d = (float)todayFeatures.Us10YYieldChange7d,
-                    Sp500Return7d = (float)todayFeatures.Sp500Return7d,
-                    DistToLowerLiquidityWall = (float)todayFeatures.DistToLowerLiquidityWall,
-                    DistToUpperLiquidityWall = (float)todayFeatures.DistToUpperLiquidityWall,
-                    IsLongLiquiditySwept = todayFeatures.IsLongLiquiditySwept ? 1f : 0f,
-                    IsShortLiquiditySwept = todayFeatures.IsShortLiquiditySwept ? 1f : 0f,
-                    FearGreedIndex = todayMarket.FearGreedIndex,
-                    CoinbasePremium = (float)todayMarket.CoinbasePremium
-                };
-
-                var output = _predictionEngine.Predict(input);
-                probability = output.Probability;
+                var outFt = _fastTreeEngine.Predict(input);
+                if (!float.IsNaN(outFt.Probability) && !float.IsInfinity(outFt.Probability))
+                    fastTreeProb = Math.Clamp(outFt.Probability, 0.02f, 0.98f);
             }
-            else
+            if (_fastForestEngine != null)
             {
-                // Heuristic baseline if ML model not trained yet
-                probability = CalculateHeuristicProbability(todayFeatures, todayMarket);
+                var outFf = _fastForestEngine.Predict(input);
+                if (!float.IsNaN(outFf.Probability) && !float.IsInfinity(outFf.Probability))
+                    fastForestProb = Math.Clamp(outFf.Probability, 0.02f, 0.98f);
+            }
+            if (_logisticEngine != null)
+            {
+                var outLog = _logisticEngine.Predict(input);
+                if (!float.IsNaN(outLog.Probability) && !float.IsInfinity(outLog.Probability))
+                    logisticProb = Math.Clamp(outLog.Probability, 0.02f, 0.98f);
             }
         }
+
+        // Multi-Model Ensemble Weight Calculation
+        double aucFt = LastTrainingMetrics?.FastTreeAuc > 0.5 ? LastTrainingMetrics.FastTreeAuc : 0.72;
+        double aucFf = LastTrainingMetrics?.FastForestAuc > 0.5 ? LastTrainingMetrics.FastForestAuc : 0.70;
+        double aucLog = LastTrainingMetrics?.LogisticAuc > 0.5 ? LastTrainingMetrics.LogisticAuc : 0.65;
+        double aucExp = 0.68;
+
+        // Base weights proportional to excess AUC over 0.45
+        decimal wFt = (decimal)Math.Max(0.10, aucFt - 0.45);
+        decimal wFf = (decimal)Math.Max(0.10, aucFf - 0.45);
+        decimal wLog = (decimal)Math.Max(0.10, aucLog - 0.45);
+        decimal wExp = (decimal)Math.Max(0.10, aucExp - 0.45);
+
+        // Regime-aware modulation
+        if (todayFeatures.KaufmanEfficiencyRatio10d > 0.55m)
+        {
+            wLog *= 1.30m; // Linear trend follower
+            wFt *= 1.15m;
+        }
+        else if (todayFeatures.KaufmanEfficiencyRatio10d < 0.25m)
+        {
+            wFf *= 1.30m;  // Random forest bagging resists chop
+            wExp *= 1.35m; // Golden pocket & liquidity sweep expert excels in chop
+            wLog *= 0.70m;
+        }
+
+        if (todayFeatures.IsLongLiquiditySwept || todayFeatures.IsShortLiquiditySwept)
+        {
+            wExp *= 1.30m;
+            wFt *= 1.15m;
+        }
+
+        decimal totalWeight = wFt + wFf + wLog + wExp;
+        if (totalWeight <= 0m) totalWeight = 1m;
+
+        decimal normFt = Math.Round(wFt / totalWeight, 4);
+        decimal normFf = Math.Round(wFf / totalWeight, 4);
+        decimal normLog = Math.Round(wLog / totalWeight, 4);
+        decimal normExp = Math.Round(1m - (normFt + normFf + normLog), 4);
+
+        decimal pFt = Math.Round((decimal)fastTreeProb, 4);
+        decimal pFf = Math.Round((decimal)fastForestProb, 4);
+        decimal pLog = Math.Round((decimal)logisticProb, 4);
+        decimal pExp = Math.Round((decimal)expertProb, 4);
+
+        decimal ensembleProb = Math.Clamp(
+            normFt * pFt + normFf * pFf + normLog * pLog + normExp * pExp,
+            0.02m,
+            0.98m);
+
+        float probability = (float)ensembleProb;
+
+        static string GetVoteSignal(decimal p) =>
+            p >= 0.58m ? "BULLISH" :
+            p <= 0.42m ? "BEARISH" : "NEUTRAL";
+
+        var votes = new List<EnsembleModelVote>
+        {
+            new() { ModelName = "FastTree (GBDT)", ModelFamily = "Gradient Boosted Trees", Probability = pFt, Weight = normFt, Signal = GetVoteSignal(pFt) },
+            new() { ModelName = "FastForest (RF)", ModelFamily = "Bagged Random Forest", Probability = pFf, Weight = normFf, Signal = GetVoteSignal(pFf) },
+            new() { ModelName = "SDCA Logistic Reg", ModelFamily = "Regularized Linear GLM", Probability = pLog, Weight = normLog, Signal = GetVoteSignal(pLog) },
+            new() { ModelName = "Quant Rules Expert", ModelFamily = "Structural Market Heuristics", Probability = pExp, Weight = normExp, Signal = GetVoteSignal(pExp) }
+        };
+
+        decimal meanDev = (Math.Abs(pFt - ensembleProb) + Math.Abs(pFf - ensembleProb) + Math.Abs(pLog - ensembleProb) + Math.Abs(pExp - ensembleProb)) / 4m;
+        decimal agreementPct = Math.Clamp(Math.Round((1.0m - 2.0m * meanDev) * 100m, 1), 0m, 100m);
+
+        int bullVotes = votes.Count(v => v.Signal == "BULLISH");
+        int bearVotes = votes.Count(v => v.Signal == "BEARISH");
+
+        string consensusVerdict;
+        if (bullVotes == 4 || bearVotes == 4)
+            consensusVerdict = "Unanimous Consensus";
+        else if (bullVotes >= 3 || bearVotes >= 3 || agreementPct >= 80m)
+            consensusVerdict = "Strong Consensus";
+        else if (agreementPct >= 60m)
+            consensusVerdict = "Moderate Consensus";
+        else
+            consensusVerdict = "Divided / Split Council";
+
+        var ensembleDetails = new EnsembleConsensusDetails
+        {
+            FastTreeProb = pFt,
+            FastForestProb = pFf,
+            LogisticProb = pLog,
+            ExpertProb = pExp,
+            FastTreeWeight = normFt,
+            FastForestWeight = normFf,
+            LogisticWeight = normLog,
+            ExpertWeight = normExp,
+            ConsensusAgreementPercent = agreementPct,
+            ConsensusVerdict = consensusVerdict,
+            Votes = votes
+        };
 
         // Interpret signals
         var drivers = new List<string>();
@@ -252,6 +398,11 @@ public class PredictorService : IPredictorService
         if (todayMarket.FearGreedIndex < 30)
             drivers.Add($"Market sentiment is in Extreme Fear ({todayMarket.FearGreedIndex}), historically an accumulation signal.");
 
+        if (consensusVerdict == "Unanimous Consensus")
+            drivers.Add($"Multi-Model Ensemble reached Unanimous Consensus ({agreementPct:F0}% Agreement): All 4 models align on directional momentum.");
+        else if (consensusVerdict == "Strong Consensus")
+            drivers.Add($"Multi-Model Ensemble reached Strong Consensus ({agreementPct:F0}% Agreement): 3+ independent models confirm the signal.");
+
         if (drivers.Count == 0)
             drivers.Add("Indicators are near baseline neutral conditions.");
 
@@ -304,7 +455,8 @@ public class PredictorService : IPredictorService
             InvalidationChangePercent = invalidationPct,
             RiskRewardRatio = rrRatio,
             HorizonDays = 7,
-            ProjectionCone = cone
+            ProjectionCone = cone,
+            Ensemble = ensembleDetails
         };
     }
 

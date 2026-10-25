@@ -1053,3 +1053,128 @@ body {
   border: 1px solid rgba(99, 102, 241, 0.3);
 }
 
+/* Ensemble Council Card Styling */
+.consensus-tag {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.18);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  letter-spacing: 0.02em;
+}
+
+.consensus-tag.unanimous {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.consensus-tag.strong {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.consensus-tag.moderate {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.consensus-tag.divided {
+  background: rgba(244, 63, 94, 0.2);
+  color: #fb7185;
+  border-color: rgba(244, 63, 94, 0.4);
+}
+
+.ensemble-council-breakdown {
+  margin-top: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 6px;
+}
+
+.ensemble-grid-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 0.45rem;
+  font-weight: 700;
+}
+
+.ensemble-verdict-text {
+  font-family: var(--font-mono);
+  font-size: 0.70rem;
+  color: #a5b4fc;
+}
+
+.ensemble-votes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ensemble-vote-row {
+  display: grid;
+  grid-template-columns: 110px 1fr 44px 40px;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.70rem;
+  font-family: var(--font-mono);
+}
+
+.ens-model-badge {
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ens-bar-track {
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.ens-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.ens-bar-fill.bullish {
+  background: #10b981;
+}
+
+.ens-bar-fill.bearish {
+  background: #f43f5e;
+}
+
+.ens-bar-fill.neutral {
+  background: #3b82f6;
+}
+
+.ens-vote-prob {
+  text-align: right;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.ens-vote-weight {
+  text-align: right;
+  color: var(--text-dim);
+  font-size: 0.68rem;
+}
+
+

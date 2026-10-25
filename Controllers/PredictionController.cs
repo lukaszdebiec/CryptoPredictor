@@ -71,7 +71,7 @@ public class PredictionController : ControllerBase
         if (!forceRefresh)
         {
             var saved = await _storage.GetLatestPredictionAsync(ct);
-            if (saved != null && saved.ProjectionCone != null && saved.ProjectionCone.Count > 0 && saved.TargetPrice > 0)
+            if (saved != null && saved.ProjectionCone != null && saved.ProjectionCone.Count > 0 && saved.TargetPrice > 0 && saved.Ensemble != null)
             {
                 return Ok(saved);
             }
@@ -85,6 +85,15 @@ public class PredictionController : ControllerBase
             return StatusCode(500, "No market data available.");
 
         var features = _featureCalculator.Calculate(marketData);
+
+        if (!_predictor.IsTrained && marketData.Count >= 20)
+        {
+            var trainingDataset = _turningPointDetector.BuildTrainingDataset(marketData, features, lookaheadDays: 7, bullishThreshold: 0.03m);
+            if (trainingDataset.Count >= 10)
+            {
+                _predictor.TrainModel(trainingDataset);
+            }
+        }
 
         var todayFeatures = features.Last();
         var todayMarket = marketData.Last();

@@ -57,6 +57,16 @@ public class SqliteMarketDataStorage : IMarketDataStorage
                     ""CreatedAtUtc"" TEXT NOT NULL
                 );", ct);
 
+            // Ensure EnsembleJson column exists on MarketPredictions table
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""MarketPredictions"" ADD COLUMN ""EnsembleJson"" TEXT NULL;", ct);
+            }
+            catch
+            {
+                // Column already exists, safe to ignore
+            }
+
             // Auto-migration from legacy JSON cache if SQLite table is empty
             if (!await db.MarketData.AnyAsync(ct))
             {
@@ -178,6 +188,7 @@ public class SqliteMarketDataStorage : IMarketDataStorage
 
         var existing = await db.Predictions.FirstOrDefaultAsync(p => p.Date == prediction.Date, ct);
         var driversJson = JsonSerializer.Serialize(prediction.KeyDrivers);
+        var ensembleJson = prediction.Ensemble != null ? JsonSerializer.Serialize(prediction.Ensemble) : null;
 
         if (existing != null)
         {
@@ -187,6 +198,7 @@ public class SqliteMarketDataStorage : IMarketDataStorage
             existing.MarketRegime = prediction.MarketRegime;
             existing.Confidence = prediction.Confidence;
             existing.KeyDriversJson = driversJson;
+            existing.EnsembleJson = ensembleJson;
             existing.CreatedAtUtc = DateTime.UtcNow;
         }
         else
@@ -200,6 +212,7 @@ public class SqliteMarketDataStorage : IMarketDataStorage
                 MarketRegime = prediction.MarketRegime,
                 Confidence = prediction.Confidence,
                 KeyDriversJson = driversJson,
+                EnsembleJson = ensembleJson,
                 CreatedAtUtc = DateTime.UtcNow
             });
         }
@@ -248,6 +261,19 @@ public class SqliteMarketDataStorage : IMarketDataStorage
             drivers = Array.Empty<string>();
         }
 
+        EnsembleConsensusDetails? ensemble = null;
+        if (!string.IsNullOrWhiteSpace(r.EnsembleJson))
+        {
+            try
+            {
+                ensemble = JsonSerializer.Deserialize<EnsembleConsensusDetails>(r.EnsembleJson);
+            }
+            catch
+            {
+                ensemble = null;
+            }
+        }
+
         return new MarketPrediction
         {
             Date = r.Date,
@@ -256,7 +282,8 @@ public class SqliteMarketDataStorage : IMarketDataStorage
             BullishProbability = r.BullishProbability,
             MarketRegime = r.MarketRegime,
             Confidence = r.Confidence,
-            KeyDrivers = drivers
+            KeyDrivers = drivers,
+            Ensemble = ensemble
         };
     }
 }

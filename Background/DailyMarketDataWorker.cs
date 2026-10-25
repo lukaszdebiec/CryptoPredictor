@@ -134,13 +134,13 @@ public class DailyMarketDataWorker : BackgroundService
         // 3. Compute quantitative features
         var features = featureCalculator.Calculate(allData);
 
-        // 4. Retrain FastTree ML model with updated history
+        // 4. Retrain Multi-Model Ensemble with updated history
         var trainingDataset = turningPointDetector.BuildTrainingDataset(allData, features, lookaheadDays: 7, bullishThreshold: 0.03m);
         if (trainingDataset.Count >= 20)
         {
             var metrics = predictor.TrainModel(trainingDataset);
-            _logger.LogInformation("[DailyMarketDataWorker] FastTree ML model retrained (Samples: {Count}, AUC: {Auc:F3}, Precision: {Precision:P1}).",
-                metrics.TrainingSampleCount, metrics.AreaUnderRocCurve, metrics.PositivePrecision);
+            _logger.LogInformation("[DailyMarketDataWorker] Multi-Model Ensemble retrained (Samples: {Count}, FastTree AUC: {FtAuc:F3}, FastForest AUC: {FfAuc:F3}, Logistic AUC: {LogAuc:F3}).",
+                metrics.TrainingSampleCount, metrics.FastTreeAuc, metrics.FastForestAuc, metrics.LogisticAuc);
         }
 
         // 5. Predict for latest closed candle

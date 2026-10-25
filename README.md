@@ -119,6 +119,25 @@ Zamiast prostych wskaźników analizy technicznej (RSI, MACD), system opiera si�
 - [x] **Inteligentne Filtry Zakresu:** Automatyczna adaptacja przycisków zakresu (`7D` | `14D` | `30D` | `60D` | `ALL` dla 4H oraz `30D` | `90D` | `180D` | `1Y` | `ALL` dla 1D).
 - [x] **Precyzyjny Datownik w Legendzie:** Wyświetlanie pełnego czasu UTC z godziną i minutą (`YYYY-MM-DD HH:mm UTC`) dla świec 4H.
 
+### Priorytet 13: Architektura Multi-Model Ensemble Consensus (Dynamiczne Wagi, 4 Modele, Konsensus i Alerty Telegram) ✅
+- [x] **Rada 4 Niezależnych Modeli ML i Ilościowych (Model Council):**
+  - **FastTree (GBDT):** Drzewa decyzyjne z boostingiem gradientowym, wyłapujące nieliniowe zależności wieloczynnikowe (np. jednoczesny sweep płynności + wyprzedany funding).
+  - **FastForest (Random Forest):** Zespół lasów losowych z baggingiem, wygładzający szum rynkowy i redukujący wariancję predykcji.
+  - **SDCA Logistic Regression (L1/L2 Regularized GLM):** Probabilistyczny model liniowy idealny do monotonicznych trendów makro (indeks DXY, rentowności obligacji, napływy do ETF).
+  - **Quant Rule-Based Expert:** Ilościowy silnik reguł rynkowych (strefa 0.618 Golden Pocket, formacje wybić płynności SFP, skrajności sentymentu Fear & Greed).
+- [x] **Dynamiczne Ważenie Modeli (Adaptive Regime Weighting):**
+  - Bazowe wagi kalkulowane z nadwyżki AUC na zbiorze testowym ($\max(0.10, AUC - 0.45)$).
+  - Adaptacja do reżimu rynku: w silnych trendach (Kaufman Efficiency Ratio $> 0.55$) preferencja modeli liniowych i FastTree; w konsolidacjach i korektach (KER $< 0.25$) wzmocnienie wag modelu FastForest oraz eksperta regułowego.
+  - Automatyczna normalizacja wag do sumy równej 1.0.
+- [x] **Wskaźnik Zgodności Konsensusu (Consensus Agreement & Verdict):**
+  - Ilościowy pomiar odchylenia predykcji poszczególnych modeli od średniej zespołu z metryką zgodności $0-100\%$.
+  - Klasyfikacja werdyktu rady: `Unanimous Consensus`, `Strong Consensus`, `Moderate Consensus`, `Divided / Split Council`.
+- [x] **Persystencja SQLite & Rozszerzenie Alertów Telegram:**
+  - Automatyczna migracja kolumny `EnsembleJson` w tabeli `MarketPredictions`.
+  - Wzbogacone powiadomienia na Telegramie zawierające werdykt konsensusu, poziom zgodności oraz rozbicie prawdopodobieństw i wag poszczególnych modeli.
+- [x] **Interfejs Użytkownika:**
+  - Przebudowa karty głównej na `ML ENSEMBLE CONSENSUS` z dynamiczną plakietką poziomu zgodności (np. `85% Agree`), paskiem prawdopodobieństwa oraz rozwijaną siatką modeli z paskami postępu i wagami.
+
 ---
 
 

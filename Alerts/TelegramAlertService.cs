@@ -114,6 +114,26 @@ public class TelegramAlertService : ITelegramAlertService
         sb.AppendLine($"🛡️ <b>Confidence:</b> {prediction.Confidence}");
         sb.AppendLine();
 
+        if (prediction.TargetPrice > 0m)
+        {
+            sb.AppendLine($"🎯 <b>Target Price (TP):</b> ${prediction.TargetPrice:N2} ({prediction.TargetChangePercent:+0.0%;-0.0%;0.0%})");
+            sb.AppendLine($"🛑 <b>Invalidation (SL):</b> ${prediction.InvalidationPrice:N2} ({prediction.InvalidationChangePercent:+0.0%;-0.0%;0.0%})");
+            sb.AppendLine($"📐 <b>Risk/Reward:</b> 1:{prediction.RiskRewardRatio:F1} (Horizon: {prediction.HorizonDays}d)");
+            sb.AppendLine();
+        }
+
+        if (prediction.Ensemble != null)
+        {
+            sb.AppendLine("🤖 <b>Multi-Model Ensemble Consensus:</b>");
+            sb.AppendLine($"• <b>Verdict:</b> {prediction.Ensemble.ConsensusVerdict} ({prediction.Ensemble.ConsensusAgreementPercent:F0}% Agreement)");
+            foreach (var vote in prediction.Ensemble.Votes)
+            {
+                string icon = vote.Signal == "BULLISH" ? "🟢" : vote.Signal == "BEARISH" ? "🔴" : "⚪";
+                sb.AppendLine($"  {icon} <code>{vote.ModelName}</code>: <b>{vote.Probability:P1}</b> (Weight: {vote.Weight:P0})");
+            }
+            sb.AppendLine();
+        }
+
         if (prediction.KeyDrivers != null && prediction.KeyDrivers.Count > 0)
         {
             sb.AppendLine("🔍 <b>Key Market Drivers:</b>");
