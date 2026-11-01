@@ -2,7 +2,7 @@ namespace CryptoPredictor.Prediction.Trajectory;
 
 public static class TrajectoryPolicy
 {
-    public const string Version = "trajectory-v2.1";
+    public const string Version = "trajectory-v2.2";
     public const int Horizon = 7;
     public const int Warmup = 60;
     public const int MinimumSamples = 500;

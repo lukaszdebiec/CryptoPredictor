@@ -41,6 +41,8 @@
   let predictionUpperSeries = null;
   let predictionLowerSeries = null;
   let predictionCenterSeries = null;
+  let cycleAnalogSeries = null;
+  let activeProjectionMode = 'confluence7d';
   let showForecastCone = true;
   let currentMainHeight = parseInt(localStorage.getItem('cp_main_chart_height') || '560', 10);
   let currentSubHeight = parseInt(localStorage.getItem('cp_sub_chart_height') || '220', 10);
@@ -201,6 +203,16 @@
       priceLineVisible: false,
       lastValueVisible: true,
       crosshairMarkerVisible: true
+    });
+
+    cycleAnalogSeries = mainChart.addSeries(LightweightCharts.LineSeries, {
+      color: '#f59e0b',
+      lineWidth: 2,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: true,
+      visible: false
     });
 
     // 2. Subchart (Microstructure & Indicators)
@@ -593,17 +605,22 @@
       }
 
       // Draw model-derived daily quantiles independently of the directional trade signal.
-      const projection = TrajectoryView.series(data.trajectory, currentTimeframe, showForecastCone);
+      const projection = ConfluenceView.series(data, activeProjectionMode, currentTimeframe, showForecastCone);
+      renderConfluencePanel(data);
       const status = document.getElementById('trajectory-status');
       if (status) status.textContent = projection.message;
-      const color = projection.validated ? '#38bdf8' : '#f59e0b';
+      const color = projection.color;
       if (predictionCenterSeries && predictionUpperSeries && predictionLowerSeries) {
         predictionCenterSeries.applyOptions({ visible: projection.hasPoints, color, title: projection.title,
-          lineStyle: projection.validated ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed });
-        predictionUpperSeries.applyOptions({ visible: projection.hasPoints, color, title: 'Q90 (dzień)', lineStyle: LightweightCharts.LineStyle.Dotted });
-        predictionLowerSeries.applyOptions({ visible: projection.hasPoints, color, title: 'Q10 (dzień)', lineStyle: LightweightCharts.LineStyle.Dotted });
+          lineStyle: projection.solidCenter ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed });
+        predictionUpperSeries.applyOptions({ visible: projection.hasPoints, color, title: projection.upperTitle, lineStyle: LightweightCharts.LineStyle.Dotted });
+        predictionLowerSeries.applyOptions({ visible: projection.hasPoints, color, title: projection.lowerTitle, lineStyle: LightweightCharts.LineStyle.Dotted });
         // Always clear old curves when the next response has insufficient data or the overlay is hidden.
-        predictionCenterSeries.setData(projection.median);
+        predictionCenterSeries.setData(projection.center);
+        if (cycleAnalogSeries) {
+          cycleAnalogSeries.applyOptions({ visible: projection.hasCycleAnalog, title: projection.cycleTitle || 'Analog Cyklu (30D)' });
+          cycleAnalogSeries.setData(projection.cycleAnalog || []);
+        }
         predictionUpperSeries.setData(projection.upper);
         predictionLowerSeries.setData(projection.lower);
       }
@@ -643,6 +660,102 @@
       }
     } catch (err) {
       console.error('Failed to render chart:', err);
+    }
+  }
+
+  function escapeHtml(text) {
+    return String(text ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function renderConfluencePanel(data) {
+    const conf = activeProjectionMode === 'confluence30d' ? data?.confluence30d : data?.confluence7d;
+    const horizonEl = document.getElementById('conf-horizon-label');
+    const asOfEl = document.getElementById('conf-asof-label');
+    const scoreEl = document.getElementById('conf-score-badge');
+    const biasEl = document.getElementById('conf-bias-badge');
+    const targetEl = document.getElementById('conf-target-badge');
+    const gridEl = document.getElementById('conf-pillars-grid');
+    const cycleEl = document.getElementById('conf-cycle-box');
+
+    if (!gridEl) return;
+    const is30d = activeProjectionMode === 'confluence30d';
+    if (horizonEl) horizonEl.textContent = is30d ? '30D' : '7D';
+
+    if (!conf || conf.status !== 'READY') {
+      if (asOfEl) asOfEl.textContent = conf?.message || 'Brak zamkniętej historii do obliczenia konfluencji.';
+      if (scoreEl) { scoreEl.className = 'conf-score-pill neutral'; scoreEl.textContent = '-- / 100'; }
+      if (biasEl) { biasEl.className = 'conf-bias-pill neutral'; biasEl.textContent = conf?.biasLabel || 'BRAK DANYCH'; }
+      if (targetEl) targetEl.textContent = '--';
+      gridEl.innerHTML = `<div class="conf-pillar-empty">${escapeHtml(conf?.message || 'Brak danych konfluencji.')}</div>`;
+      if (cycleEl) cycleEl.style.display = 'none';
+      return;
+    }
+
+    const score = Number(conf.confluenceScore) || 0;
+    const scoreSign = score > 0 ? '+' : '';
+    const tone = conf.bias === 'BULLISH' ? 'bullish' : conf.bias === 'BEARISH' ? 'bearish' : 'neutral';
+    const chg = Number(conf.projectedChangePercent) || 0;
+    const chgSign = chg > 0 ? '+' : '';
+    const dailyVolPct = (Number(conf.dailyVolatility || 0) * 100).toFixed(2);
+
+    if (asOfEl) {
+      asOfEl.textContent = `Zamknięcie bazowe UTC: ${conf.asOfDate || '--'} · Zmienność dzienna (RVOL/DVOL): ${dailyVolPct}%`;
+    }
+    if (scoreEl) {
+      scoreEl.className = `conf-score-pill ${tone}`;
+      scoreEl.textContent = `${scoreSign}${score.toFixed(1)} / 100`;
+    }
+    if (biasEl) {
+      biasEl.className = `conf-bias-pill ${tone}`;
+      biasEl.textContent = conf.biasLabel || conf.bias;
+    }
+    if (targetEl) {
+      const endPrice = Number(conf.projectedEndPrice) || 0;
+      targetEl.textContent = `Projekcja ${conf.horizonDays}D: $${endPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })} (${chgSign}${chg.toFixed(1)}%)`;
+    }
+
+    const pillars = conf.pillars || [];
+    gridEl.innerHTML = pillars.map(p => {
+      const pts = Number(p.weightedPoints) || 0;
+      const raw = Number(p.rawScore) || 0;
+      const effW = Math.round((Number(p.effectiveWeight) || 0) * 100);
+      const ptsCls = pts > 0.5 ? 'pos' : pts < -0.5 ? 'neg' : 'flat';
+      const ptsSign = pts > 0 ? '+' : '';
+      const barWidth = Math.min(50, Math.abs(raw) * 50);
+      const barLeft = raw >= 0 ? 50 : (50 - barWidth);
+      const barCls = raw >= 0 ? 'pos' : 'neg';
+      const rawSign = raw > 0 ? '+' : '';
+      return `
+        <div class="conf-pillar-card ${p.isAvailable ? '' : 'inactive'}">
+          <div class="conf-pillar-top">
+            <span class="conf-pillar-name">${escapeHtml(p.name)}</span>
+            <span class="conf-pillar-pts ${ptsCls}">${ptsSign}${pts.toFixed(1)} pkt</span>
+          </div>
+          <div class="conf-bar-track">
+            <div class="conf-bar-zero"></div>
+            <div class="conf-bar-fill ${barCls}" style="left: ${barLeft.toFixed(1)}%; width: ${barWidth.toFixed(1)}%;"></div>
+          </div>
+          <div class="conf-pillar-meta">
+            <span>Waga: ${effW}%</span>
+            <span>Sygnał: ${rawSign}${raw.toFixed(2)}</span>
+          </div>
+          <div class="conf-pillar-summary">${escapeHtml(p.summary)}</div>
+        </div>
+      `;
+    }).join('');
+
+    if (cycleEl) {
+      const cyc = conf.cycleAnalog;
+      if (cyc && (is30d || cyc.available)) {
+        cycleEl.style.display = 'block';
+        cycleEl.innerHTML = `<strong>🗓️ Kontekst 4-letniego Cyklu (${escapeHtml(cyc.cyclePhaseLabel)}):</strong> ${escapeHtml(cyc.message)}`;
+      } else {
+        cycleEl.style.display = 'none';
+      }
     }
   }
 
@@ -1500,6 +1613,23 @@
     });
 
     // Toggle 7D Forecast Cone Button
+    const projModeSelector = document.getElementById('projection-mode-selector');
+    if (projModeSelector) {
+      projModeSelector.querySelectorAll('.proj-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const mode = btn.getAttribute('data-proj-mode') || 'confluence7d';
+          activeProjectionMode = mode;
+          showForecastCone = true;
+          projModeSelector.querySelectorAll('.proj-mode-btn').forEach(b => b.classList.toggle('active', b === btn));
+          const toggleBtn = document.getElementById('btn-toggle-cone');
+          if (toggleBtn) toggleBtn.classList.add('active');
+          if (cachedChartData) {
+            renderChart(cachedChartData, true);
+          }
+        });
+      });
+    }
+
     const btnToggleCone = document.getElementById('btn-toggle-cone');
     if (btnToggleCone) {
       btnToggleCone.addEventListener('click', () => {
@@ -1957,20 +2087,23 @@
 
       tmCandleSeries.setData(histData);
 
-      const projection = TrajectoryView.series(data.trajectory);
+      const useMedianInTm = activeProjectionMode === 'median7d' || data.confluence?.status !== 'READY';
+      const projection = useMedianInTm
+        ? (() => { const t = TrajectoryView.series(data.trajectory); return { ...t, center: t.median, color: t.validated ? '#38bdf8' : '#f59e0b', solidCenter: t.validated, upperTitle: 'Q90 (dzień)', lowerTitle: 'Q10 (dzień)' }; })()
+        : ConfluenceView.series({ confluence7d: data.confluence }, 'confluence7d', '1d', true);
       const trajectoryStatus = document.getElementById('tm-trajectory-status');
       if (trajectoryStatus) trajectoryStatus.textContent = projection.message;
       tmUpperConeSeries.setData(projection.upper);
       tmLowerConeSeries.setData(projection.lower);
-      tmExpectedLineSeries.setData(projection.median);
-      const tmTrajColor = projection.validated ? '#38bdf8' : '#f59e0b';
-      tmUpperConeSeries.applyOptions({ visible: projection.hasPoints, color: tmTrajColor, title: 'Q90 (dzień)', lineStyle: window.LightweightCharts.LineStyle.Dotted });
-      tmLowerConeSeries.applyOptions({ visible: projection.hasPoints, color: tmTrajColor, title: 'Q10 (dzień)', lineStyle: window.LightweightCharts.LineStyle.Dotted });
+      tmExpectedLineSeries.setData(projection.center);
+      const tmTrajColor = projection.color;
+      tmUpperConeSeries.applyOptions({ visible: projection.hasPoints, color: tmTrajColor, title: projection.upperTitle, lineStyle: window.LightweightCharts.LineStyle.Dotted });
+      tmLowerConeSeries.applyOptions({ visible: projection.hasPoints, color: tmTrajColor, title: projection.lowerTitle, lineStyle: window.LightweightCharts.LineStyle.Dotted });
       tmExpectedLineSeries.applyOptions({
         visible: projection.hasPoints,
         title: projection.title,
         color: tmTrajColor,
-        lineStyle: projection.validated ? window.LightweightCharts.LineStyle.Solid : window.LightweightCharts.LineStyle.Dashed
+        lineStyle: projection.solidCenter ? window.LightweightCharts.LineStyle.Solid : window.LightweightCharts.LineStyle.Dashed
       });
 
       // Draw TP and SL price lines

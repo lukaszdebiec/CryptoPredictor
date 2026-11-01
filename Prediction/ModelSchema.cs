@@ -2,52 +2,31 @@ using Microsoft.ML.Data;
 
 namespace CryptoPredictor.Prediction;
 
+/// <summary>
+/// Slimmed, orthogonal feature input for directional classification (direction-v1.1).
+/// Redundant overlapping returns, unsigned KER, and 30-day-capped Open Interest are excluded.
+/// </summary>
 public class ModelInput
 {
-    public float BtcReturn1d { get; set; }
-    public float BtcReturn3d { get; set; }
-    public float BtcReturn7d { get; set; }
-    public float BtcReturn30d { get; set; }
-
+    // 1. Structure & Impulse
+    public float SignedKaufmanEfficiencyRatio10d { get; set; }
+    public float WeeklyTrendBias { get; set; }
     public float BtcDrawdownFrom30dHigh { get; set; }
-    public float BtcDrawdownFromAth { get; set; }
 
-    public float RealizedVolatility7d { get; set; }
+    // 2. Volatility & Volume Exhaustion
     public float RealizedVolatility30d { get; set; }
-
     public float VolumeVs30dAverage { get; set; }
 
-    public float OiChange1d { get; set; }
-    public float OiChange7d { get; set; }
-    public float OiZScore30d { get; set; }
-
-    public float FundingZScore30d { get; set; }
-    public float FundingZScore90d { get; set; }
-
-    public float DvolZScore30d { get; set; }
-    public float EtfFlow7d { get; set; }
+    // 3. Spot & Institutional Flows
+    public float CoinbasePremiumZScore30d { get; set; }
     public float EtfFlowZScore30d { get; set; }
 
-    public float FearGreedIndex { get; set; }
-    public float CoinbasePremium { get; set; }
+    // 4. Derivatives Crowding & Sentiment
+    public float FundingZScore30d { get; set; }
+    public float FearGreedCentered { get; set; }
 
-    // Quantitative Fibonacci & Wave Dynamics
-    public float FibRetracementRatio30d { get; set; }
-    public float DistToGoldenPocket30d { get; set; }
-    public float KaufmanEfficiencyRatio10d { get; set; }
-    public float WeeklyTrendBias { get; set; }
-
-    // Global Macro Dynamics (Liquidity, Currency & Equities)
-    public float DxyReturn7d { get; set; }
+    // 5. Macro Liquidity
     public float DxyZScore30d { get; set; }
-    public float Us10YYieldChange7d { get; set; }
-    public float Sp500Return7d { get; set; }
-
-    // Liquidity Pools & Liquidation Walls (Sweep Engine)
-    public float DistToLowerLiquidityWall { get; set; }
-    public float DistToUpperLiquidityWall { get; set; }
-    public float IsLongLiquiditySwept { get; set; }
-    public float IsShortLiquiditySwept { get; set; }
 
     [ColumnName("Label")]
     public bool Label { get; set; }

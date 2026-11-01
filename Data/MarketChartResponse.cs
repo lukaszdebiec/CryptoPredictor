@@ -1,4 +1,5 @@
 using CryptoPredictor.Prediction;
+using CryptoPredictor.Prediction.Confluence;
 
 namespace CryptoPredictor.Data;
 
@@ -12,6 +13,8 @@ public sealed record MarketChartResponse
     public LiquiditySummary? Liquidity { get; init; }
     public PredictionSummary? Prediction { get; init; }
     public CryptoPredictor.Prediction.Trajectory.TrajectoryForecast? Trajectory { get; init; }
+    public ConfluenceForecast? Confluence7d { get; init; }
+    public ConfluenceForecast? Confluence30d { get; init; }
 }
 
 public sealed record PredictionSummary
@@ -53,6 +56,7 @@ public sealed record IndicatorDataPoint
 {
     public required string Time { get; init; }
     public decimal? FundingZScore30d { get; init; }
+    public decimal? CoinbasePremiumZScore30d { get; init; }
     public decimal? EtfFlow7dUsd { get; init; }
     public decimal? EtfFlowDailyUsd { get; init; }
     public decimal? EtfFlowZScore30d { get; init; }
@@ -62,6 +66,7 @@ public sealed record IndicatorDataPoint
     public decimal? FibRetracementRatio30d { get; init; }
     public decimal? DistToGoldenPocket30d { get; init; }
     public decimal? KaufmanEfficiencyRatio10d { get; init; }
+    public decimal? SignedKaufmanEfficiencyRatio10d { get; init; }
     public decimal? WeeklyTrendBias { get; init; }
     public decimal? Dxy { get; init; }
     public decimal? DxyZScore30d { get; init; }
@@ -104,6 +109,7 @@ public sealed record FibLevelsSummary
     public decimal CurrentRatio { get; init; }
     public bool InGoldenPocket { get; init; }
     public decimal KaufmanEfficiencyRatio { get; init; }
+    public decimal SignedKaufmanEfficiencyRatio { get; init; }
     public string WaveRegime { get; init; } = "";
 }
 

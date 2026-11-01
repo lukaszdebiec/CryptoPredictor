@@ -1,6 +1,8 @@
+using CryptoPredictor.Data;
 using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
-using CryptoPredictor.Data;
+using CryptoPredictor.Features;
+using CryptoPredictor.Prediction.Confluence;
 using CryptoPredictor.Prediction.Trajectory;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,7 +10,12 @@ namespace CryptoPredictor.Controllers;
 
 [ApiController]
 [Route("api/prediction/trajectory")]
-public sealed class TrajectoryController(ITrajectoryProvider provider, IPriceHistoryService downloader, IPriceHistoryCache cache) : ControllerBase
+public sealed class TrajectoryController(
+    ITrajectoryProvider provider,
+    IPriceHistoryService downloader,
+    IPriceHistoryCache cache,
+    IConfluenceIndicatorService? confluence = null,
+    IFeatureCalculator? featureCalculator = null) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<TrajectoryForecast>> Latest(CancellationToken ct) => Ok(await provider.GetAsync(ct: ct));
@@ -30,6 +37,16 @@ public sealed class TrajectoryController(ITrajectoryProvider provider, IPriceHis
         if (all.Count == 0) return StatusCode(503, "No dedicated price history. Use POST /api/prediction/trajectory/sync-history first.");
         var selected = days > 0 ? all.TakeLast(days).ToList() : all;
         var last = all[^1]; var prior = all.Count > 1 ? all[^2] : last;
+
+        ConfluenceForecast? confluence7d = null;
+        ConfluenceForecast? confluence30d = null;
+        if (confluence != null && featureCalculator != null)
+        {
+            var feats = featureCalculator.Calculate(all);
+            confluence7d = confluence.Evaluate(all, feats, 7, last.Date, all);
+            confluence30d = confluence.Evaluate(all, feats, 30, last.Date, all);
+        }
+
         return Ok(new MarketChartResponse
         {
             Candles = selected.Select(c => new CandleDataPoint { Time = c.Date.ToString("yyyy-MM-dd"), Open = c.BtcOpen, High = c.BtcHigh, Low = c.BtcLow, Close = c.BtcClose, Volume = c.BtcVolume }).ToList(),
@@ -37,7 +54,9 @@ public sealed class TrajectoryController(ITrajectoryProvider provider, IPriceHis
             Summary = new ChartSummary { LatestDate = last.Date.ToString("yyyy-MM-dd"), LatestClose = last.BtcClose,
                 PriceChange24hPercent = (last.BtcClose / prior.BtcClose - 1m) * 100m, TotalDays = selected.Count,
                 HighPeriod = selected.Max(c => c.BtcHigh), LowPeriod = selected.Min(c => c.BtcLow) },
-            Trajectory = await provider.GetAsync(ct: ct)
+            Trajectory = await provider.GetAsync(ct: ct),
+            Confluence7d = confluence7d,
+            Confluence30d = confluence30d
         });
     }
 

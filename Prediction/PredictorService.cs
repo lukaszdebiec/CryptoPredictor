@@ -8,8 +8,8 @@ using Microsoft.ML;
 namespace CryptoPredictor.Prediction;
 
 /// <summary>
-/// A deliberately small directional baseline. Optional external feeds remain available to the
-/// dashboard but cannot enter this model until their point-in-time coverage has been validated.
+/// Regularized directional baseline using orthogonal price structure, volatility/volume regime,
+/// institutional spot/ETF flows, derivatives funding, sentiment, and macro dollar liquidity.
 /// </summary>
 public class PredictorService : IPredictorService, IDisposable
 {
@@ -25,30 +25,30 @@ public class PredictorService : IPredictorService, IDisposable
 
     private static readonly string[] FeatureColumns =
     [
-        nameof(ModelInput.BtcReturn1d), nameof(ModelInput.BtcReturn3d), nameof(ModelInput.BtcReturn7d),
-        nameof(ModelInput.BtcReturn30d), nameof(ModelInput.BtcDrawdownFrom30dHigh),
-        nameof(ModelInput.RealizedVolatility7d), nameof(ModelInput.RealizedVolatility30d),
-        nameof(ModelInput.VolumeVs30dAverage), nameof(ModelInput.KaufmanEfficiencyRatio10d),
+        nameof(ModelInput.SignedKaufmanEfficiencyRatio10d),
         nameof(ModelInput.WeeklyTrendBias),
-        nameof(ModelInput.FundingZScore30d), nameof(ModelInput.EtfFlowZScore30d),
-        nameof(ModelInput.OiZScore30d), nameof(ModelInput.DvolZScore30d),
-        nameof(ModelInput.FibRetracementRatio30d)
+        nameof(ModelInput.BtcDrawdownFrom30dHigh),
+        nameof(ModelInput.RealizedVolatility30d),
+        nameof(ModelInput.VolumeVs30dAverage),
+        nameof(ModelInput.CoinbasePremiumZScore30d),
+        nameof(ModelInput.EtfFlowZScore30d),
+        nameof(ModelInput.FundingZScore30d),
+        nameof(ModelInput.FearGreedCentered),
+        nameof(ModelInput.DxyZScore30d)
     ];
 
     private static ModelInput Input(DailyFeatures f, bool label = false) => new()
     {
-        BtcReturn1d = (float)f.BtcReturn1d, BtcReturn3d = (float)f.BtcReturn3d,
-        BtcReturn7d = (float)f.BtcReturn7d, BtcReturn30d = (float)f.BtcReturn30d,
-        BtcDrawdownFrom30dHigh = (float)f.BtcDrawdownFrom30dHigh,
-        RealizedVolatility7d = (float)f.RealizedVolatility7d, RealizedVolatility30d = (float)f.RealizedVolatility30d,
-        VolumeVs30dAverage = (float)f.VolumeVs30dAverage,
-        KaufmanEfficiencyRatio10d = (float)f.KaufmanEfficiencyRatio10d,
+        SignedKaufmanEfficiencyRatio10d = (float)f.SignedKaufmanEfficiencyRatio10d,
         WeeklyTrendBias = (float)f.WeeklyTrendBias,
-        FundingZScore30d = (float)f.FundingZScore30d,
+        BtcDrawdownFrom30dHigh = (float)f.BtcDrawdownFrom30dHigh,
+        RealizedVolatility30d = (float)f.RealizedVolatility30d,
+        VolumeVs30dAverage = (float)f.VolumeVs30dAverage,
+        CoinbasePremiumZScore30d = (float)f.CoinbasePremiumZScore30d,
         EtfFlowZScore30d = (float)f.EtfFlowZScore30d,
-        OiZScore30d = (float)f.OiZScore30d,
-        DvolZScore30d = (float)f.DvolZScore30d,
-        FibRetracementRatio30d = (float)f.FibRetracementRatio30d,
+        FundingZScore30d = (float)f.FundingZScore30d,
+        FearGreedCentered = (float)f.FearGreedCentered,
+        DxyZScore30d = (float)f.DxyZScore30d,
         Label = label
     };
 
@@ -187,7 +187,7 @@ public class PredictorService : IPredictorService, IDisposable
             KeyDrivers =
             [
                 PredictionPolicy.ProbabilityMeaning,
-                "Regularized logistic baseline using price action, volatility, derivatives funding, and institutional ETF flows.",
+                "Regularized logistic baseline using signed KER impulse, macro trend, Coinbase & ETF flows, derivatives funding, sentiment, and DXY liquidity.",
                 status == "DATA_UNAVAILABLE" ? "Recent price observations are incomplete; no trade is issued."
                     : !trained ? "No trained model: no trade is issued." : metrics?.PassesValidation != true
                     ? "The chronological holdout did not beat the training-base-rate benchmark; no trade is issued."

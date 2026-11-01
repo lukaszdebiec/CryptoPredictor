@@ -237,9 +237,9 @@ public sealed class PriceTrajectoryService : IPriceTrajectoryService
     private static double DailyVolatility(DailyFeatures f) => Math.Clamp((double)f.RealizedVolatility30d / Math.Sqrt(365d), .002d, .20d);
     private static double Scale(Sample s, int h) => s.DailyVolatility * Math.Sqrt(h);
     private static double[] Vector(DailyFeatures f) =>
-    [ (double)f.BtcReturn1d, (double)f.BtcReturn3d, (double)f.BtcReturn7d, (double)f.BtcReturn30d,
-      (double)f.BtcDrawdownFrom30dHigh, (double)f.RealizedVolatility7d, (double)f.RealizedVolatility30d,
-      (double)f.VolumeVs30dAverage, (double)f.KaufmanEfficiencyRatio10d, (double)f.WeeklyTrendBias ];
+    [ (double)f.BtcReturn1d, (double)f.BtcReturn7d, (double)f.BtcDrawdownFrom30dHigh,
+      (double)f.RealizedVolatility7d, (double)f.RealizedVolatility30d,
+      (double)f.VolumeVs30dAverage, (double)f.SignedKaufmanEfficiencyRatio10d, (double)f.WeeklyTrendBias ];
     public static bool Valid(DailyMarketData b) => b.BtcClose > 0m && b.BtcOpen > 0m && b.BtcLow > 0m &&
         b.BtcHigh >= Math.Max(b.BtcOpen, b.BtcClose) && b.BtcLow <= Math.Min(b.BtcOpen, b.BtcClose) && b.BtcVolume >= 0m;
 }

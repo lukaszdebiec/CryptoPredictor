@@ -92,44 +92,78 @@ public class BinanceDataService : IBinanceDataService
         }
     }
 
-    public async Task<IReadOnlyDictionary<DateOnly, decimal>> GetDailyFundingRatesAsync(string symbol = "BTCUSDT", int limit = 1000, CancellationToken ct = default)
+    public async Task<IReadOnlyDictionary<DateOnly, decimal>> GetDailyFundingRatesAsync(string symbol = "BTCUSDT", int days = 365, CancellationToken ct = default)
     {
+        int targetDays = Math.Clamp(days, 1, 2000);
+        var todayUtcDate = DateTimeOffset.UtcNow.UtcDateTime.Date;
+        var todayOnly = DateOnly.FromDateTime(todayUtcDate);
+        long cursorMs = new DateTimeOffset(todayUtcDate.AddDays(-targetDays), TimeSpan.Zero).ToUnixTimeMilliseconds();
+        long endMs = new DateTimeOffset(todayUtcDate, TimeSpan.Zero).ToUnixTimeMilliseconds() - 1;
+
         try
         {
-            var url = $"https://fapi.binance.com/fapi/v1/fundingRate?symbol={symbol}&limit={limit}";
-            using var response = await _httpClient.GetAsync(url, ct);
-
-            if ((int)response.StatusCode == 451 || !response.IsSuccessStatusCode)
-            {
-                // Fallback to Deribit public perpetual funding rates (not geo-blocked in US)
-                return await GetDeribitFundingRatesAsync(limit, ct);
-            }
-
-            using var stream = await response.Content.ReadAsStreamAsync(ct);
-            using var jsonDoc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-
             var dailyRates = new Dictionary<DateOnly, List<decimal>>();
+            const int pageLimit = 1000;
+            const int maxPages = 12;
 
-            foreach (var item in jsonDoc.RootElement.EnumerateArray())
+            for (int page = 0; page < maxPages && cursorMs <= endMs; page++)
             {
-                var fundingTimeMs = item.GetProperty("fundingTime").GetInt64();
-                var date = DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(fundingTimeMs).UtcDateTime.Date);
-                var rate = decimal.Parse(item.GetProperty("fundingRate").GetString()!, CultureInfo.InvariantCulture);
+                var url = $"https://fapi.binance.com/fapi/v1/fundingRate?symbol={symbol}&startTime={cursorMs}&endTime={endMs}&limit={pageLimit}";
+                using var response = await _httpClient.GetAsync(url, ct);
 
-                if (!dailyRates.TryGetValue(date, out var list))
+                if ((int)response.StatusCode == 451 || !response.IsSuccessStatusCode)
                 {
-                    list = new List<decimal>();
-                    dailyRates[date] = list;
+                    if (dailyRates.Count == 0)
+                    {
+                        // Fallback to Deribit public perpetual funding rates (not geo-blocked in US)
+                        return await GetDeribitFundingRatesAsync(targetDays, ct);
+                    }
+                    break;
                 }
-                list.Add(rate);
+
+                using var stream = await response.Content.ReadAsStreamAsync(ct);
+                using var jsonDoc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+                int count = 0;
+                long maxFundingTimeMs = cursorMs;
+
+                foreach (var item in jsonDoc.RootElement.EnumerateArray())
+                {
+                    count++;
+                    var fundingTimeMs = item.GetProperty("fundingTime").GetInt64();
+                    if (fundingTimeMs > maxFundingTimeMs)
+                        maxFundingTimeMs = fundingTimeMs;
+
+                    var date = DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(fundingTimeMs).UtcDateTime.Date);
+                    if (date >= todayOnly)
+                        continue;
+
+                    var rate = decimal.Parse(item.GetProperty("fundingRate").GetString()!, CultureInfo.InvariantCulture);
+
+                    if (!dailyRates.TryGetValue(date, out var list))
+                    {
+                        list = new List<decimal>(3);
+                        dailyRates[date] = list;
+                    }
+                    list.Add(rate);
+                }
+
+                if (count < pageLimit || maxFundingTimeMs <= cursorMs)
+                    break;
+
+                cursorMs = maxFundingTimeMs + 1;
             }
 
-            // 24h funding rate = sum of the 8h periods in that day
+            // 24h funding rate = sum of the 8h periods in that closed UTC day
             return dailyRates.ToDictionary(k => k.Key, v => v.Value.Sum());
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
-            return await GetDeribitFundingRatesAsync(limit, ct);
+            return await GetDeribitFundingRatesAsync(targetDays, ct);
         }
     }
 
@@ -171,42 +205,59 @@ public class BinanceDataService : IBinanceDataService
     {
         try
         {
-            var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var startMs = DateTimeOffset.UtcNow.AddDays(-Math.Max(days, 60)).ToUnixTimeMilliseconds();
-            var url = $"https://www.deribit.com/api/v2/public/get_funding_rate_history?instrument_name=BTC-PERPETUAL&start_timestamp={startMs}&end_timestamp={endMs}";
-
-            using var response = await _httpClient.GetAsync(url, ct);
-            if (!response.IsSuccessStatusCode)
-                return new Dictionary<DateOnly, decimal>();
-
-            using var stream = await response.Content.ReadAsStreamAsync(ct);
-            using var jsonDoc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-
-            if (!jsonDoc.RootElement.TryGetProperty("result", out var resultElem) || resultElem.ValueKind != JsonValueKind.Array)
-                return new Dictionary<DateOnly, decimal>();
-
+            int targetDays = Math.Clamp(days, 1, 2000);
+            var todayUtcDate = DateTimeOffset.UtcNow.UtcDateTime.Date;
+            var todayOnly = DateOnly.FromDateTime(todayUtcDate);
             var dailyRates = new Dictionary<DateOnly, List<decimal>>();
 
-            foreach (var item in resultElem.EnumerateArray())
+            // Deribit returns hourly entries (~720 rows per 30 days); paginate in 30-day windows.
+            for (var chunkStart = todayUtcDate.AddDays(-targetDays); chunkStart < todayUtcDate; chunkStart = chunkStart.AddDays(30))
             {
-                var timestampMs = item.GetProperty("timestamp").GetInt64();
-                var date = DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(timestampMs).UtcDateTime.Date);
+                var chunkEnd = chunkStart.AddDays(30);
+                if (chunkEnd > todayUtcDate)
+                    chunkEnd = todayUtcDate;
 
-                decimal rate = 0m;
-                if (item.TryGetProperty("interest_8h", out var interest8h))
-                {
-                    rate = interest8h.GetDecimal();
-                }
+                var startMs = new DateTimeOffset(chunkStart, TimeSpan.Zero).ToUnixTimeMilliseconds();
+                var endMs = new DateTimeOffset(chunkEnd, TimeSpan.Zero).ToUnixTimeMilliseconds() - 1;
+                var url = $"https://www.deribit.com/api/v2/public/get_funding_rate_history?instrument_name=BTC-PERPETUAL&start_timestamp={startMs}&end_timestamp={endMs}";
 
-                if (!dailyRates.TryGetValue(date, out var list))
+                using var response = await _httpClient.GetAsync(url, ct);
+                if (!response.IsSuccessStatusCode)
+                    break;
+
+                using var stream = await response.Content.ReadAsStreamAsync(ct);
+                using var jsonDoc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+                if (!jsonDoc.RootElement.TryGetProperty("result", out var resultElem) || resultElem.ValueKind != JsonValueKind.Array)
+                    continue;
+
+                foreach (var item in resultElem.EnumerateArray())
                 {
-                    list = new List<decimal>();
-                    dailyRates[date] = list;
+                    var timestampMs = item.GetProperty("timestamp").GetInt64();
+                    var date = DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(timestampMs).UtcDateTime.Date);
+                    if (date >= todayOnly)
+                        continue;
+
+                    decimal rate = 0m;
+                    if (item.TryGetProperty("interest_8h", out var interest8h))
+                    {
+                        rate = interest8h.GetDecimal();
+                    }
+
+                    if (!dailyRates.TryGetValue(date, out var list))
+                    {
+                        list = new List<decimal>();
+                        dailyRates[date] = list;
+                    }
+                    list.Add(rate);
                 }
-                list.Add(rate);
             }
 
             return dailyRates.ToDictionary(k => k.Key, v => v.Value.Count > 0 ? v.Value.Average() * 3m : 0m);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {

@@ -150,6 +150,74 @@ public class PredictionTests
     }
 
     [Fact]
+    public void SignedKaufmanEfficiencyDistinguishesUptrendsFromCrashesWhileUiKerRemainsUnsigned()
+    {
+        var upBars = Enumerable.Range(0, 25).Select(i => new DailyMarketData
+        {
+            Date = new DateOnly(2024, 1, 1).AddDays(i),
+            BtcOpen = 100m + i * 2m, BtcClose = 102m + i * 2m, BtcHigh = 103m + i * 2m, BtcLow = 99m + i * 2m, BtcVolume = 100m
+        }).ToList();
+        var downBars = Enumerable.Range(0, 25).Select(i => new DailyMarketData
+        {
+            Date = new DateOnly(2024, 1, 1).AddDays(i),
+            BtcOpen = 200m - i * 2m, BtcClose = 198m - i * 2m, BtcHigh = 201m - i * 2m, BtcLow = 197m - i * 2m, BtcVolume = 100m
+        }).ToList();
+        var chopBars = Enumerable.Range(0, 25).Select(i =>
+        {
+            decimal c = i % 2 == 0 ? 100m : 105m;
+            return new DailyMarketData
+            {
+                Date = new DateOnly(2024, 1, 1).AddDays(i),
+                BtcOpen = c, BtcClose = c, BtcHigh = c + 1m, BtcLow = c - 1m, BtcVolume = 100m
+            };
+        }).ToList();
+
+        var upFeat = _calculator.Calculate(upBars)[^1];
+        var downFeat = _calculator.Calculate(downBars)[^1];
+        var chopFeat = _calculator.Calculate(chopBars)[^1];
+
+        Assert.Equal(1m, upFeat.KaufmanEfficiencyRatio10d);
+        Assert.Equal(1m, upFeat.SignedKaufmanEfficiencyRatio10d);
+        Assert.Equal(1m, downFeat.KaufmanEfficiencyRatio10d);
+        Assert.Equal(-1m, downFeat.SignedKaufmanEfficiencyRatio10d);
+        Assert.Equal(0m, chopFeat.KaufmanEfficiencyRatio10d);
+        Assert.Equal(0m, chopFeat.SignedKaufmanEfficiencyRatio10d);
+    }
+
+    [Fact]
+    public void SparseFeedStartDoesNotSpikeZScoreAndOiIsExcludedFromModel()
+    {
+        var rng = new Random(99);
+        var bars = History(260).Select((b, i) => b with
+        {
+            // Simulate OI starting abruptly on day 200 (like a 30-day API cap) and populated Coinbase/Funding/F&G/DXY
+            FuturesOpenInterestUsd = i >= 200 ? 10_000_000_000m + i * 5_000_000m : 0m,
+            CoinbasePremium = i >= 50 ? (decimal)(rng.NextDouble() * 80 - 40) : 0m,
+            FundingRate = i >= 50 ? (decimal)(rng.NextDouble() * 0.001 - 0.0004) : 0m,
+            FearGreedIndex = 20 + (i % 65),
+            Dxy = 100m + (decimal)Math.Sin(i * 0.1) * 3m
+        }).ToList();
+
+        var features = _calculator.Calculate(bars);
+
+        // On day 200 (first non-zero OI day after 200 zeros), Z-score must stay 0 during warmup rather than spiking to +5.29 sigma.
+        Assert.Equal(0m, features[200].OiZScore30d);
+        Assert.Equal(0m, features[50].CoinbasePremiumZScore30d);
+        Assert.Equal(0m, features[50].FundingZScore30d);
+        Assert.NotEqual(0m, features[^1].CoinbasePremiumZScore30d);
+        Assert.NotEqual(0m, features[^1].FundingZScore30d);
+
+        var predictor = new PredictorService();
+        predictor.TrainModel(_detector.BuildTrainingDataset(bars, features));
+        var baseline = predictor.Predict(features[^1], bars[^1]);
+        var oiPerturbed = predictor.Predict(features[^1] with { OiZScore30d = 999m }, bars[^1]);
+        var flowPerturbed = predictor.Predict(features[^1] with { CoinbasePremiumZScore30d = features[^1].CoinbasePremiumZScore30d + 4m }, bars[^1]);
+
+        Assert.Equal(baseline.BullishProbability, oiPerturbed.BullishProbability);
+        Assert.NotEqual(baseline.BullishProbability, flowPerturbed.BullishProbability);
+    }
+
+    [Fact]
     public void MissingRecentPriceHistoryForcesAbstention()
     {
         var bars = History();

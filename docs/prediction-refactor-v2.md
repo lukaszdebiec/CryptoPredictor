@@ -1,6 +1,6 @@
 # prediction-refactor-v2 — wielkość ruchu BTC
 
-Branch bazuje na `prediction-refactor-v1` (`870c314`). Dodaje osobny model `trajectory-v2.1` do przewidywania dziennych zamknięć za 1, 2, …, 7 dni. Klasyfikator kierunku, reguły transakcji i zapisane prognozy v1 pozostają osobną warstwą.
+Branch bazuje na `prediction-refactor-v1` (`870c314`). Dodaje osobny model `trajectory-v2.2` do przewidywania dziennych zamknięć za 1, 2, …, 7 dni. Klasyfikator kierunku (`direction-v1.1`), reguły transakcji i zapisane prognozy v1 pozostają osobną warstwą.
 
 ## Co przedstawia wykres
 
@@ -47,9 +47,9 @@ Limit jednego backfillu to 3650 zakończonych dni UTC. 1825 dni to około pięci
 
 Gdy stare źródła nie pozwalają pobrać głównego wykresu 1D, frontend może pokazać niezależny wykres cen z nowego cache. Nie wymyśla wówczas brakujących wskaźników ani sygnału transakcyjnego. Pozostałe funkcje v1 mogą nadal wymagać ich własnych danych.
 
-## Metoda modelowania (`trajectory-v2.1`)
+## Metoda modelowania (`trajectory-v2.2`)
 
-1. Dla każdego horyzontu `h` celem jest `log(close[D+h] / close[D])`, podzielony przez zmienność dobową znaną w D i `sqrt(h)`. Używany jest stały zestaw 10 cech cenowo-wolumenowych z v1. Funding, OI, sentyment i przyszłe świece nie wchodzą do regresji.
+1. Dla każdego horyzontu `h` celem jest `log(close[D+h] / close[D])`, podzielony przez zmienność dobową znaną w D i `sqrt(h)`. Używany jest odchudzony zestaw 8 cech cenowo-wolumenowych (w tym kierunkowy `SignedKaufmanEfficiencyRatio10d` zamiast bezkierunkowego `KER10d`, bez zduplikowanych zwrotów 3D/30D). Funding, OI, sentyment i przyszłe świece nie wchodzą do regresji czysto cenowej.
 2. Zamiast regresji średniokwadratowej (MSE) z post-hoc przesunięciem medianowym, `QuantileRegressor` bezpośrednio minimalizuje wygładzoną funkcję straty kwantylowej (*pinball loss*, $\varepsilon = 0{,}02$) metodą IRLS (*Iteratively Reweighted Least Squares*) dla trzech osobnych modeli na każdy horyzont: $\tau \in \{0{,}10; 0{,}50; 0{,}90\}$. Standaryzacja jest dopasowana wyłącznie na treningu, a cechy ograniczone do ±5 odchyleń. Silna regularyzacja L2 nachyleń (`10.0`) oraz wyrazu wolnego mediany (`5.0`) zapobiega przenoszeniu jednorocznego dryfu hossy/bessy na kolejne reżimy.
 3. Najstarsze 60% dostępnych początków prognozy służy do dopasowania, następne 20% do konformalnej kalibracji ogonów, a ostatnie 20% do walidacji. Przy obu granicach usuwane są obserwacje, których siedmiodniowy wynik dotyka następnego okresu lub do niego wchodzi.
 4. Na osobnym okresie kalibracyjnym wyznaczane są poprawki konformalne kwantyli dolnego (0,10) i górnego (0,90) z wymuszeniem monotoniczności $Q_{10} \le Q_{50} \le Q_{90}$ (*Split Conformalized Quantile Regression*). Mediana $Q_{50}$ pochodzi bezpośrednio z modelu kwantylowego $\tau = 0{,}50$, bez doklejania historycznego dryfu z okresu kalibracji.
@@ -61,7 +61,7 @@ Nie ma gwarancji, że regresja kwantylowa przewyższy losowe błądzenie w każd
 
 ## Zapis i wersjonowanie
 
-Tabela `TrajectorySnapshots` jest dodawana oddzielnie, bez przepisywania istniejących prognoz v1 ani wcześniejszych snapshotów `trajectory-v2.0`. Kluczem są data źródłowej świecy, giełda, symbol i wersja modelu (`trajectory-v2.1`). Pierwsza wygenerowana estymata z kompletem ośmiu punktów (D oraz D+1…D+7) jest zachowywana. Niedostateczna historia nie blokuje późniejszego wytrenowania modelu tego samego dnia.
+Tabela `TrajectorySnapshots` jest dodawana oddzielnie, bez przepisywania istniejących prognoz v1 ani wcześniejszych snapshotów `trajectory-v2.0` / `v2.1`. Kluczem są data źródłowej świecy, giełda, symbol i wersja modelu (`trajectory-v2.2`). Pierwsza wygenerowana estymata z kompletem ośmiu punktów (D oraz D+1…D+7) jest zachowywana. Niedostateczna historia nie blokuje późniejszego wytrenowania modelu tego samego dnia.
 
 API, główny wykres i symulacja historyczna korzystają z tego samego providera oraz wieloelementowego cache'u LRU (do 64 początków prognozy w pamięci). Zapisany snapshot dla danej daty jest zwracany także po korektach/backfillu danych; nie przepisujemy wyniku „po poznaniu przyszłości”.
 
@@ -82,4 +82,16 @@ dotnet build tools/Trajectory/Trajectory.csproj -c Release
 dotnet build CryptoPredictor.csproj -c Release
 ```
 
-Na próbie 1825 rzeczywistych świec dziennych `BinanceUS` (`BTCUSDT`, `missingDates=0`, do `2026-10-31`) model `trajectory-v2.1` osiągnął na rocznym zbiorze walidacyjnym (`N=352`) dla horyzontu 7D `MAE=0.04385` wobec `0.04386` dla benchmarku „brak zmiany”, `Pinball=0.01547` wobec `0.01549` oraz pokrycie przedziału `79.3%` (nominalnie `80%`), a w 42-okresowej kroczącej ewaluacji poza próbą (co 30 dni, 2023–2026) obniżył 7-dniowe RMSE o 6,0% względem `trajectory-v2.0` (`0.05477` vs `0.05827`) przy pokryciu `83.3%`. Przewaga punktowej mediany nad błądzeniem losowym na dziennych danych OHLCV pozostaje minimalna — główną wartością informacyjną krzywej są skalibrowane zmiennościowo pasma niepewności Q10–Q90.
+Na próbie 1825 rzeczywistych świec dziennych `BinanceUS` (`BTCUSDT`, `missingDates=0`, do `2026-10-31`) model `trajectory-v2.2` osiągnął na rocznym zbiorze walidacyjnym (`N=352`) dla horyzontu 7D `Pinball=0.01547` wobec `0.01549` dla benchmarku „brak zmiany” oraz pokrycie przedziału `79.3%` (nominalnie `80%`), a w 42-okresowej kroczącej ewaluacji poza próbą (co 30 dni, 2023–2026) obniżył 7-dniowe RMSE o 6,1% względem `trajectory-v2.0` (`0.05470` vs `0.05827`) przy pokryciu `83.3%`. Przewaga punktowej mediany nad błądzeniem losowym na dziennych danych OHLCV pozostaje minimalna — główną wartością informacyjną krzywej są skalibrowane zmiennościowo pasma niepewności Q10–Q90.
+
+
+## 4-Filarowy Wskaźnik Konfluencji (`confluence-v1.0`)
+
+Niezależnie od czysto cenowej mediany `trajectory-v2.2` oraz klasyfikatora `direction-v1.1`, warstwa `ConfluenceIndicatorService` agreguje wieloźródłowe czynniki rynkowe w czytelny indeks `ConfluenceScore` w skali `[-100, +100]` i rysuje na wykresie pasmo zmiennościowe na **7 dni** (`Confluence7d`) lub **30 dni** (`Confluence30d`):
+
+1. **Przepływy Spot & ETF** (`40%` wagi w 7D / `35%` w 30D): `CoinbasePremiumZScore30d` oraz `EtfFlowZScore30d`.
+2. **Pozycjonowanie & Sentyment kontrariański** (`30%` w 7D / `25%` w 30D): odwrócony `FundingZScore30d`, nieliniowe skrajności `FearGreedCentered`, wyczerpanie wolumenowe 3D oraz bonus za wycięcie płynności (`IsLongLiquiditySwept` / `IsShortLiquiditySwept`).
+3. **Struktura Ceny — Fibo & KER** (`20%` w 7D / `10%` w 30D): `WeeklyTrendBias` (SMA50), głębokość zniesienia `FibRetracementRatio30d` (z premią w `Golden Pocket`) oraz kierunkowy `SignedKaufmanEfficiencyRatio10d` z tłumieniem pogoni za parabolicznym przegrzaniem (`KER > 0.45`).
+4. **Makro Płynność** (`10%` w 7D / `30%` w 30D): odwrócony `DxyZScore30d` oraz 7-dniowa zmiana rentowności `Us10YYieldChange7d`.
+
+Jeżeli dany feed zewnętrzny nie jest dostępny w danym dniu (np. brak danych makro lub przepływów w czystej historii OHLCV), jego waga jest proporcjonalnie rozdzielana na aktywne filary bez sztucznego spłaszczania wyniku do zera. W trybie **30D + Cykl**, po pobraniu wieloletniej historii świec (**„Historia BTC: 5 lat”**), na wykres nakładana jest dodatkowo przerywana ścieżka **Analogu Cyklu / Sezonowości**, która normalizuje historyczne ścieżki `D..D+30` z poprzednich lat względem lokalnej zmienności i nadaje wagę `2x` latom o tej samej fazie 4-letniego cyklu Halving / Midterms (`year % 4`), z zachowaniem pełnej izolacji czasowej (*point-in-time*, bez wycieku przyszłości).

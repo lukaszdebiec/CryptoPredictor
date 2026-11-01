@@ -37,18 +37,19 @@ public class MarketDataAggregator : IMarketDataAggregator
     {
         _logger.LogInformation("Starting market data aggregation for {Days} days...", days);
 
+        int lookbackDays = days + 35; // buffer for rolling indicators
         var endDate = DateTime.UtcNow;
-        var startDate = endDate.AddDays(-days - 35); // buffer for rolling indicators
+        var startDate = endDate.AddDays(-lookbackDays);
 
         // Run data fetching concurrently for performance
-        var klinesTask = _binanceDataService.GetDailyKlinesAsync("BTCUSDT", limit: Math.Min(days + 35, 1000), ct);
-        var fundingTask = _binanceDataService.GetDailyFundingRatesAsync("BTCUSDT", limit: 1000, ct);
-        var oiTask = _binanceDataService.GetDailyOpenInterestAsync("BTCUSDT", limit: Math.Min(days + 35, 500), ct);
-        var fngTask = _sentimentDataService.GetFearAndGreedHistoryAsync(limit: days + 35, ct);
-        var coinbaseTask = _coinbaseDataService.GetDailyClosePricesAsync(ct);
+        var klinesTask = _binanceDataService.GetDailyKlinesAsync("BTCUSDT", limit: Math.Min(lookbackDays, 1000), ct);
+        var fundingTask = _binanceDataService.GetDailyFundingRatesAsync("BTCUSDT", days: lookbackDays, ct);
+        var oiTask = _binanceDataService.GetDailyOpenInterestAsync("BTCUSDT", limit: Math.Min(lookbackDays, 500), ct);
+        var fngTask = _sentimentDataService.GetFearAndGreedHistoryAsync(limit: lookbackDays, ct);
+        var coinbaseTask = _coinbaseDataService.GetDailyClosePricesAsync(days: lookbackDays, ct);
         var dvolTask = _deribitDataService.GetDailyDvolHistoryAsync(startDate, endDate, ct);
         var etfTask = _etfDataService.GetDailyEtfNetFlowsAsync(ct);
-        var macroTask = _macroDataService.GetMacroHistoryAsync("2y", ct);
+        var macroTask = _macroDataService.GetMacroHistoryAsync(lookbackDays > 700 ? "5y" : "2y", ct);
 
         await Task.WhenAll(klinesTask, fundingTask, oiTask, fngTask, coinbaseTask, dvolTask, etfTask, macroTask);
 
@@ -61,8 +62,8 @@ public class MarketDataAggregator : IMarketDataAggregator
         var etfMap = await etfTask;
         var macro = await macroTask;
 
-        _logger.LogInformation("Fetched {KlinesCount} candles, {FundingCount} funding dates, {OiCount} OI dates, {FngCount} F&G dates, {EtfCount} ETF dates, {DxyCount} DXY dates.",
-            klines.Count, fundingMap.Count, oiMap.Count, fngMap.Count, etfMap.Count, macro.Dxy.Count);
+        _logger.LogInformation("Fetched {KlinesCount} candles, {FundingCount} funding dates, {CoinbaseCount} Coinbase dates, {OiCount} OI dates, {FngCount} F&G dates, {EtfCount} ETF dates, {DxyCount} DXY dates.",
+            klines.Count, fundingMap.Count, coinbaseMap.Count, oiMap.Count, fngMap.Count, etfMap.Count, macro.Dxy.Count);
 
         var aggregated = new List<DailyMarketData>();
         var sortedKlines = klines.OrderBy(k => k.Date).ToList();
@@ -113,7 +114,7 @@ public class MarketDataAggregator : IMarketDataAggregator
                 FundingRate = fundingRate,
                 CoinbasePremium = coinbasePremium,
                 BtcDvol = dvol,
-                FearGreedIndex = fearGreed > 0 ? fearGreed : 50,
+                FearGreedIndex = fearGreed > 0 ? fearGreed : 0,
                 BitcoinEtfNetFlowUsd = etfFlow,
                 Dxy = lastDxy,
                 Us10YearYield = lastUs10y,

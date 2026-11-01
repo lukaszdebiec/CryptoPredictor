@@ -34,6 +34,103 @@ public class IntegrationTests
     }
 
     [Fact]
+    public async Task PaginatedFundingAndCoinbaseBackfillCoverMultiChunkWindowsAndExcludeOpenDay()
+    {
+        var todayUtc = DateTimeOffset.UtcNow.UtcDateTime.Date;
+        var todayOnly = DateOnly.FromDateTime(todayUtc);
+        int fundingCalls = 0;
+        var fundingHandler = new RoutingHandler(req =>
+        {
+            fundingCalls++;
+            if (fundingCalls == 1)
+            {
+                // Return exactly 1000 8h settlements (~333 days) starting 500 days ago so page 2 is requested.
+                var start = new DateTimeOffset(todayUtc.AddDays(-500), TimeSpan.Zero);
+                var page1 = Enumerable.Range(0, 1000).Select(i => new
+                {
+                    fundingTime = start.AddHours(i * 8).ToUnixTimeMilliseconds(),
+                    fundingRate = "0.0001"
+                });
+                return JsonSerializer.Serialize(page1);
+            }
+            var page2Start = new DateTimeOffset(todayUtc.AddDays(-2), TimeSpan.Zero);
+            var page2 = new[]
+            {
+                new { fundingTime = page2Start.ToUnixTimeMilliseconds(), fundingRate = "0.0002" },
+                new { fundingTime = page2Start.AddHours(8).ToUnixTimeMilliseconds(), fundingRate = "0.0002" },
+                new { fundingTime = page2Start.AddHours(16).ToUnixTimeMilliseconds(), fundingRate = "0.0002" },
+                // Open-day settlement (must be excluded)
+                new { fundingTime = new DateTimeOffset(todayUtc.AddHours(8), TimeSpan.Zero).ToUnixTimeMilliseconds(), fundingRate = "0.0099" }
+            };
+            return JsonSerializer.Serialize(page2);
+        });
+
+        var funding = await new BinanceDataService(new HttpClient(fundingHandler)).GetDailyFundingRatesAsync("BTCUSDT", days: 500);
+        Assert.Equal(2, fundingCalls);
+        Assert.True(funding.Count > 330);
+        Assert.Equal(0.0006m, funding[todayOnly.AddDays(-2)]);
+        Assert.False(funding.ContainsKey(todayOnly));
+
+        int coinbaseCalls = 0;
+        var coinbaseHandler = new RoutingHandler(_ =>
+        {
+            coinbaseCalls++;
+            var d = todayUtc.AddDays(-coinbaseCalls * 10);
+            var openSec = new DateTimeOffset(todayUtc, TimeSpan.Zero).ToUnixTimeSeconds();
+            var closedSec = new DateTimeOffset(d, TimeSpan.Zero).ToUnixTimeSeconds();
+            return JsonSerializer.Serialize(new object[][]
+            {
+                [openSec, 99000, 101000, 100000, 100500, 500],
+                [closedSec, 90000, 92000, 90500, 91000 + coinbaseCalls, 400]
+            });
+        });
+
+        var coinbase = await new CoinbaseDataService(new HttpClient(coinbaseHandler)).GetDailyClosePricesAsync(days: 600);
+        Assert.Equal(3, coinbaseCalls); // ceil(600 / 290) = 3 chunks
+        Assert.Equal(3, coinbase.Count);
+        Assert.False(coinbase.ContainsKey(todayOnly));
+    }
+
+    [Fact]
+    public async Task StorageUpsertPreservesHistoricalExternalFeedsWhenResyncHasZeros()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "crypto-merge-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "Data", "storage"));
+        string path = Path.Combine(root, "Data", "storage", "market_data.db");
+        var options = new DbContextOptionsBuilder<CryptoPredictorDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        try
+        {
+            var storage = new SqliteMarketDataStorage(new Factory(options), new TestHost(root), NullLogger<SqliteMarketDataStorage>.Instance);
+            var initial = OutcomeTests.Bar(0) with
+            {
+                FuturesOpenInterestUsd = 18_500_000_000m,
+                FundingRate = 0.0003m,
+                CoinbasePremium = 42.5m,
+                FearGreedIndex = 74
+            };
+            await storage.SaveAsync([initial]);
+
+            // Simulate a later wide-window resync where upstream OI/Funding returned 0 for older dates, while price was corrected.
+            var resync = OutcomeTests.Bar(0, close: 101.25m) with
+            {
+                FuturesOpenInterestUsd = 0m,
+                FundingRate = 0m,
+                CoinbasePremium = 0m,
+                FearGreedIndex = 0
+            };
+            await storage.SaveAsync([resync]);
+
+            var loaded = Assert.Single(await storage.LoadAsync());
+            Assert.Equal(101.25m, loaded.BtcClose);
+            Assert.Equal(18_500_000_000m, loaded.FuturesOpenInterestUsd);
+            Assert.Equal(0.0003m, loaded.FundingRate);
+            Assert.Equal(42.5m, loaded.CoinbasePremium);
+            Assert.Equal(74, loaded.FearGreedIndex);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task OldSqliteSchemaMigratesAdditivelyAndFirstForecastIsImmutable()
     {
         var root = Path.Combine(Path.GetTempPath(), "crypto-tests-" + Guid.NewGuid().ToString("N"));
@@ -134,6 +231,11 @@ public class IntegrationTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
             => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(payload, Encoding.UTF8, "application/json") });
+    }
+    private sealed class RoutingHandler(Func<HttpRequestMessage, string> responder) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(responder(request), Encoding.UTF8, "application/json") });
     }
     private sealed class Factory(DbContextOptions<CryptoPredictorDbContext> options) : IDbContextFactory<CryptoPredictorDbContext>
     {

@@ -3,7 +3,7 @@ namespace CryptoPredictor.Prediction;
 /// <summary>Versioned research defaults, fixed before inspecting validation results.</summary>
 public static class PredictionPolicy
 {
-    public const string Version = "direction-v1";
+    public const string Version = "direction-v1.1";
     public const string ProbabilityMeaning = "P(BTC daily close in 7 calendar days > signal-day close)";
     public const int HorizonDays = 7;
     public const int WarmupDays = 60;
