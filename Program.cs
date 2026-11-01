@@ -4,6 +4,7 @@ using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
 using CryptoPredictor.Prediction;
+using CryptoPredictor.Prediction.Trajectory;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -41,6 +42,11 @@ builder.Services.AddSingleton<IFeatureCalculator, FeatureCalculator>();
 builder.Services.AddSingleton<ITurningPointDetector, TurningPointDetector>();
 builder.Services.AddSingleton<IPredictorService, PredictorService>();
 builder.Services.AddSingleton<IBacktestEngine, BacktestEngine>();
+builder.Services.AddHttpClient<IPriceHistoryService, PriceHistoryService>(client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddSingleton<IPriceHistoryCache, PriceHistoryCache>();
+builder.Services.AddSingleton<IPriceTrajectoryService, PriceTrajectoryService>();
+builder.Services.AddSingleton<ITrajectorySnapshotStore, TrajectorySnapshotStore>();
+builder.Services.AddSingleton<ITrajectoryProvider, TrajectoryProvider>();
 
 // Background Worker for automated daily 00:05 UTC cycle
 builder.Services.AddHostedService<CryptoPredictor.Background.DailyMarketDataWorker>();

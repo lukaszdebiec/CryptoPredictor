@@ -1,5 +1,7 @@
 # CryptoPredictor 🚀
 
+> **`prediction-refactor-v2`:** oddzielny model wielkości ruchu: mediany dziennych zamknięć BTC dla horyzontów 1–7D i empiryczne przedziały 10–90%. Wymaga osobnej, dłuższej historii cen. [Instrukcja pobierania danych, działania modelu i weryfikacji](docs/prediction-refactor-v2.md). Nie zastępuje sygnałów transakcyjnych z v1 i nie stanowi potwierdzenia przewagi rynkowej.
+
 > **Branch `prediction-refactor-v1`:** aktualny silnik to prosty, regularizowany model kierunku ceny zamknięcia BTC za 7 dni, z chronologiczną walidacją i możliwością niewydawania sygnału. Nie używa już ręcznych prawdopodobieństw ani rady czterech modeli. [Zakres zmian, wyniki próbki, ograniczenia i polecenia testów](docs/prediction-refactor-v1.md). Poniższy opis roadmapy dokumentuje wcześniejsze iteracje i nie stanowi dowodu jakości obecnej predykcji.
 
 Zaawansowany system analityczno-predykcyjny oparty na **.NET 9 Web API** oraz **ML.NET**, dedykowany do wykrywania asymetrii ryzyka do zysku, punktów zwrotnych (lokalne dołki i szczyty) oraz reżimów rynkowych na Bitcoinie (BTC).

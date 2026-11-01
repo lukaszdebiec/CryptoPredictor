@@ -4,6 +4,7 @@ using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
 using CryptoPredictor.Prediction;
+using CryptoPredictor.Prediction.Trajectory;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CryptoPredictor.Controllers;
@@ -17,12 +18,14 @@ public class PredictionController : ControllerBase
     private readonly IFeatureCalculator _featureCalculator;
     private readonly IMarketDataStorage _storage;
     private readonly IMarketDataAggregator _aggregator;
+    private readonly ITrajectoryProvider _trajectory;
 
     public PredictionController(IPredictorService predictor, ITurningPointDetector turningPointDetector,
-        IFeatureCalculator featureCalculator, IMarketDataStorage storage, IMarketDataAggregator aggregator)
+        IFeatureCalculator featureCalculator, IMarketDataStorage storage, IMarketDataAggregator aggregator, ITrajectoryProvider trajectory)
     {
         _predictor = predictor; _turningPointDetector = turningPointDetector;
         _featureCalculator = featureCalculator; _storage = storage; _aggregator = aggregator;
+        _trajectory = trajectory;
     }
 
     private async Task<IReadOnlyList<DailyMarketData>> History(int days, CancellationToken ct)
@@ -126,6 +129,7 @@ public class PredictionController : ControllerBase
             Date = date, BtcClose = history[^1].BtcClose, StrictlyOutOfSample = true,
             TrainingSamplesUsed = predictor.LastTrainingMetrics?.TrainingSampleCount ?? 0,
             HistoricalCandles = history.TakeLast(60).Select(Candle), ForwardCandles = forward.Select(Candle), Prediction = prediction,
+            Trajectory = await _trajectory.GetAsync(date, ct),
             Resolution = new
             {
                 outcome.OutcomeStatus, outcome.RealizedReturnPercent, outcome.ResolvedDate, outcome.ResolvedPrice,
