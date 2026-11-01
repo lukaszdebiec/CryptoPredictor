@@ -79,13 +79,31 @@ public class TrajectoryModelTests
     }
 
     [Fact]
-    public void CorrectionsInvalidateCacheButOptionalFeedChangesDoNot()
+    public void AncientGapUsesContiguousSuffixWithoutInterpolation()
     {
-        var bars = PredictionTests.History(800);
+        var bars = PredictionTests.History(950);
+        var withAncientGap = bars.ToList();
+        withAncientGap.RemoveAt(100); // Leaves 849 strictly consecutive candles ending at cutoff.
+        var service = new PriceTrajectoryService();
+        var fromGapped = service.Forecast(withAncientGap, "UserFile", "BTCUSDT");
+        var fromSuffix = service.Forecast(bars.Skip(101).ToList(), "UserFile", "BTCUSDT");
+        Assert.Equal(849, fromGapped.Observations);
+        Assert.Equal(8, fromGapped.Points.Count);
+        Assert.Equal(fromSuffix.DataFingerprint, fromGapped.DataFingerprint);
+        Assert.Equal(fromSuffix.Points, fromGapped.Points);
+    }
+
+    [Fact]
+    public void CorrectionsInvalidateCacheButOptionalFeedChangesAndHistoricalQueriesDoNot()
+    {
+        var bars = PredictionTests.History(820);
         var model = new PriceTrajectoryService();
         var first = model.Forecast(bars, "UserFile", "BTCUSDT");
+        var historical = model.Forecast(bars, "UserFile", "BTCUSDT", bars[800].Date);
+        Assert.NotSame(first, historical);
         bars[500] = bars[500] with { FundingRate = 99m, FearGreedIndex = 1, FuturesOpenInterestUsd = 123456m };
         Assert.Same(first, model.Forecast(bars, "UserFile", "BTCUSDT"));
+        Assert.Same(historical, model.Forecast(bars, "UserFile", "BTCUSDT", bars[800].Date));
         bars[500] = bars[500] with { BtcClose = bars[500].BtcClose * 1.001m };
         Assert.NotEqual(first.DataFingerprint, model.Forecast(bars, "UserFile", "BTCUSDT").DataFingerprint);
     }
@@ -106,5 +124,17 @@ public class TrajectoryModelTests
         Assert.Equal(.9d, PriceTrajectoryService.Pinball(1d, 0d, .9), 10);
         Assert.Equal(.1d, PriceTrajectoryService.Pinball(0d, 1d, .9), 10);
         Assert.Throws<ArgumentException>(() => new PriceTrajectoryService().Forecast([], "UserFile", "BTCUSDT", DateOnly.FromDateTime(DateTime.UtcNow)));
+    }
+
+    [Fact]
+    public void ConformalQuantileModelHandlesFatTailedShockWithoutCrossingIntervals()
+    {
+        var bars = PredictionTests.History(820);
+        // Inject a severe fat-tailed crash and recovery inside the historical fit window.
+        bars[250] = bars[250] with { BtcClose = bars[250].BtcClose * 0.55m, BtcLow = bars[250].BtcClose * 0.50m };
+        var result = new PriceTrajectoryService().Forecast(bars, "UserFile", "BTCUSDT");
+        Assert.Equal("trajectory-v2.1", result.ModelVersion);
+        Assert.Equal(8, result.Points.Count);
+        Assert.All(result.Points, p => Assert.True(p.LowerPrice > 0m && p.LowerPrice <= p.MedianPrice && p.MedianPrice <= p.UpperPrice));
     }
 }

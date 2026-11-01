@@ -55,6 +55,7 @@ public class MarketDataController : ControllerBase
         if (days <= 0 || days > 1000)
             return BadRequest("Days must be between 1 and 1000.");
 
+        await _trajectory.TryRefreshCachedHistoryAsync(ct);
         var data = await _aggregator.FetchAndAggregateAsync(days, saveToStorage: true, ct);
         if (data.Count == 0)
             return StatusCode(500, "No market data could be fetched.");
@@ -702,7 +703,7 @@ public class MarketDataController : ControllerBase
             Fibonacci = fibSummary,
             Liquidity = liqSummary,
             Prediction = predSummary,
-            Trajectory = await _trajectory.GetAsync(latestDaily?.Date, ct)
+            Trajectory = await _trajectory.GetAsync(ct: ct)
         });
     }
 }

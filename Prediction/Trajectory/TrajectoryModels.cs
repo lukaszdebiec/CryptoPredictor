@@ -2,14 +2,18 @@ namespace CryptoPredictor.Prediction.Trajectory;
 
 public static class TrajectoryPolicy
 {
-    public const string Version = "trajectory-v2.0";
+    public const string Version = "trajectory-v2.1";
     public const int Horizon = 7;
     public const int Warmup = 60;
     public const int MinimumSamples = 500;
     public const int MinimumFit = 250;
     public const int MinimumCalibration = 60;
     public const int MinimumValidation = 60;
-    public const double RidgePenalty = 1.0;
+    public const double MedianSlopePenalty = 10.0;
+    public const double MedianInterceptPenalty = 5.0;
+    public const double TailSlopePenalty = 10.0;
+    public const double TailInterceptPenalty = 0.2;
+    public const double PinballSmoothing = 0.02;
     public const double LowerQuantile = 0.10;
     public const double UpperQuantile = 0.90;
 }
@@ -63,7 +67,7 @@ public sealed record TrajectoryForecast
     public int EligibleSamples { get; init; }
     public int RequiredSamples { get; init; } = TrajectoryPolicy.MinimumSamples;
     public double NominalMarginalCoverage { get; init; } = 0.80;
-    public string IntervalMethod { get; init; } = "Volatility-scaled empirical residual quantiles on a separate chronological calibration period; no joint-path coverage guarantee.";
+    public string IntervalMethod { get; init; } = "Volatility-scaled L2-regularized quantile regression with split conformal calibration on a separate chronological period; no joint-path coverage guarantee.";
     public int ServingFitSamples { get; init; }
     public int ServingCalibrationSamples { get; init; }
     public DateOnly? ServingFitOutcomeEnd { get; init; }

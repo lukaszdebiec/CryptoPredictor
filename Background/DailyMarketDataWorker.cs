@@ -120,23 +120,7 @@ public class DailyMarketDataWorker : BackgroundService
         int daysToSync = _configuration.GetValue("Worker:DaysToSync", 60);
 
         // Once a backfill exists, keep the dedicated market's history fresh without mixing exchanges.
-        var priceCache = scope.ServiceProvider.GetRequiredService<IPriceHistoryCache>();
-        var cachedPrices = await priceCache.LoadAsync(ct);
-        if (cachedPrices?.Candles.Count > 0)
-        {
-            try
-            {
-                var downloader = scope.ServiceProvider.GetRequiredService<IPriceHistoryService>();
-                var end = DateOnly.FromDateTime(DateTime.UtcNow);
-                var refreshed = await downloader.DownloadAsync(priceCache.Source, cachedPrices.Candles[^1].Date.AddDays(-7), end, ct);
-                await priceCache.SaveAsync(refreshed, ct);
-                await scope.ServiceProvider.GetRequiredService<ITrajectoryProvider>().GetAsync(ct: ct);
-            }
-            catch (Exception ex) when (ex is HttpRequestException or InvalidDataException || ex is TaskCanceledException && !ct.IsCancellationRequested)
-            {
-                _logger.LogWarning(ex, "Price-trajectory history refresh failed; retaining the existing market cache.");
-            }
-        }
+        await scope.ServiceProvider.GetRequiredService<ITrajectoryProvider>().TryRefreshCachedHistoryAsync(ct);
 
         // 1. Fetch & aggregate latest market data
         _logger.LogInformation("[DailyMarketDataWorker] Fetching market data from all sources (Binance, Deribit, Coinbase, Farside ETF, F&G)...");

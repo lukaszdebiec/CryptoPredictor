@@ -45,6 +45,29 @@ public class TrajectoryStorageTests
     }
 
     [Fact]
+    public async Task TryRefreshCachedHistoryExtendsExistingBackfillAndSkipsWhenEmpty()
+    {
+        using var temp = new TemporaryStore();
+        var bars = PredictionTests.History(805);
+        var tailDownloader = new TailDownloader(bars.Skip(790).ToList());
+        var snapshots = new TrajectorySnapshotStore(temp.Factory);
+        var provider = new TrajectoryProvider(temp.Cache, new PriceTrajectoryService(), snapshots, tailDownloader);
+
+        Assert.False(await provider.TryRefreshCachedHistoryAsync());
+        Assert.Null(await temp.Cache.LoadAsync());
+
+        await temp.Cache.SaveAsync(Series(bars.Take(800).ToList()));
+        Assert.True(await provider.TryRefreshCachedHistoryAsync());
+        var refreshed = await temp.Cache.LoadAsync();
+        Assert.Equal(805, refreshed!.Candles.Count);
+        Assert.NotNull(await snapshots.LoadAsync(bars[^1].Date, "BinanceUS", "BTCUSDT"));
+
+        var failingProvider = new TrajectoryProvider(temp.Cache, new PriceTrajectoryService(), snapshots, new DeniedDownloader());
+        Assert.False(await failingProvider.TryRefreshCachedHistoryAsync());
+        Assert.Equal(805, (await temp.Cache.LoadAsync())!.Candles.Count);
+    }
+
+    [Fact]
     public async Task IssuedTrajectoryIsImmutableAndDoesNotAlterDirectionalSnapshots()
     {
         using var temp = new TemporaryStore();
@@ -87,6 +110,11 @@ public class TrajectoryStorageTests
     {
         Source = "BinanceUS", RequestedFrom = bars[0].Date, RequestedToExclusive = bars[^1].Date.AddDays(1), Candles = bars
     };
+    private sealed class TailDownloader(List<DailyMarketData> bars) : IPriceHistoryService
+    {
+        public Task<PriceHistorySeries> DownloadAsync(PriceHistorySource source, DateOnly from, DateOnly toExclusive, CancellationToken ct = default)
+            => Task.FromResult(Series(bars));
+    }
     private sealed class DeniedDownloader : IPriceHistoryService
     {
         public Task<PriceHistorySeries> DownloadAsync(PriceHistorySource source, DateOnly from, DateOnly toExclusive, CancellationToken ct = default)

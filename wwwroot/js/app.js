@@ -1777,7 +1777,7 @@
       lineWidth: 1,
       lineStyle: window.LightweightCharts.LineStyle.Dashed,
       priceLineVisible: false,
-      title: 'Upper Band (+1σ)'
+      title: 'Q90 (dzień)'
     });
 
     tmLowerConeSeries = tmChart.addSeries(window.LightweightCharts.LineSeries, {
@@ -1785,7 +1785,7 @@
       lineWidth: 1,
       lineStyle: window.LightweightCharts.LineStyle.Dashed,
       priceLineVisible: false,
-      title: 'Lower Band (-1σ)'
+      title: 'Q10 (dzień)'
     });
 
     tmExpectedLineSeries = tmChart.addSeries(window.LightweightCharts.LineSeries, {
@@ -1793,7 +1793,7 @@
       lineWidth: 2,
       lineStyle: window.LightweightCharts.LineStyle.Solid,
       priceLineVisible: false,
-      title: 'Expected Path'
+      title: 'Mediana modelu 1–7D'
     });
 
     // Responsive resize
@@ -1963,7 +1963,15 @@
       tmUpperConeSeries.setData(projection.upper);
       tmLowerConeSeries.setData(projection.lower);
       tmExpectedLineSeries.setData(projection.median);
-      tmExpectedLineSeries.applyOptions({ title: projection.title, color: projection.validated ? '#38bdf8' : '#f59e0b' });
+      const tmTrajColor = projection.validated ? '#38bdf8' : '#f59e0b';
+      tmUpperConeSeries.applyOptions({ visible: projection.hasPoints, color: tmTrajColor, title: 'Q90 (dzień)', lineStyle: window.LightweightCharts.LineStyle.Dotted });
+      tmLowerConeSeries.applyOptions({ visible: projection.hasPoints, color: tmTrajColor, title: 'Q10 (dzień)', lineStyle: window.LightweightCharts.LineStyle.Dotted });
+      tmExpectedLineSeries.applyOptions({
+        visible: projection.hasPoints,
+        title: projection.title,
+        color: tmTrajColor,
+        lineStyle: projection.validated ? window.LightweightCharts.LineStyle.Solid : window.LightweightCharts.LineStyle.Dashed
+      });
 
       // Draw TP and SL price lines
       const tp = Number(data.prediction.targetPrice);

@@ -13,15 +13,27 @@ public interface IPriceTrajectoryService
 
 public sealed class PriceTrajectoryService : IPriceTrajectoryService
 {
+    private const int MaxCacheEntries = 64;
     private readonly object _lock = new();
-    private (string Key, TrajectoryForecast Forecast)? _cache;
+    private readonly Dictionary<string, LinkedListNode<(string Key, TrajectoryForecast Forecast)>> _cacheIndex = new(StringComparer.Ordinal);
+    private readonly LinkedList<(string Key, TrajectoryForecast Forecast)> _cacheOrder = new();
+
     private sealed record Sample(DateOnly Date, double[] X, double DailyVolatility, double[] LogReturns);
-    private sealed record Distribution(RidgeRegressor Model, double Lower, double Median, double Upper)
+
+    private sealed record Distribution(
+        QuantileRegressor LowerModel,
+        QuantileRegressor MedianModel,
+        QuantileRegressor UpperModel,
+        double LowerAdjustment,
+        double UpperAdjustment)
     {
         public double[] Predict(Sample s, int h)
         {
-            double center = Model.Predict(s.X), scale = Scale(s, h);
-            return [(center + Lower) * scale, (center + Median) * scale, (center + Upper) * scale];
+            double scale = Scale(s, h);
+            double median = MedianModel.Predict(s.X);
+            double lower = Math.Min(median, LowerModel.Predict(s.X) + LowerAdjustment);
+            double upper = Math.Max(median, UpperModel.Predict(s.X) + UpperAdjustment);
+            return [lower * scale, median * scale, upper * scale];
         }
     }
 
@@ -39,15 +51,27 @@ public sealed class PriceTrajectoryService : IPriceTrajectoryService
         };
         if (bars.Count == 0) return template;
         if (asOfDate.HasValue && bars[^1].Date != cutoff)
-            return template with { Status = "DATA_UNAVAILABLE", Message = "No candle exists for the requested forecast origin." };
-        if (bars.Any(b => !Valid(b)) || bars.Zip(bars.Skip(1)).Any(pair => pair.First.Date.AddDays(1) != pair.Second.Date))
-            return template with { Status = "DATA_UNAVAILABLE", Message = "Price history contains duplicate dates, gaps or invalid OHLCV. No interpolation was applied." };
+            return template with { Status = "DATA_UNAVAILABLE", Message = $"No candle exists for the requested forecast origin ({cutoff:yyyy-MM-dd}); dedicated price history ends at {bars[^1].Date:yyyy-MM-dd}." };
+        if (bars.Any(b => !Valid(b)) || bars.Zip(bars.Skip(1)).Any(pair => pair.First.Date == pair.Second.Date))
+            return template with { Status = "DATA_UNAVAILABLE", Message = "Price history contains duplicate dates or invalid OHLCV. No interpolation was applied." };
+
+        int contiguousStart = bars.Count - 1;
+        while (contiguousStart > 0 && bars[contiguousStart - 1].Date.AddDays(1) == bars[contiguousStart].Date)
+            contiguousStart--;
+        if (contiguousStart > 0)
+        {
+            int minContiguousBars = TrajectoryPolicy.Warmup + TrajectoryPolicy.MinimumSamples + TrajectoryPolicy.Horizon - 1;
+            if (bars.Count - contiguousStart < minContiguousBars)
+                return template with { Status = "DATA_UNAVAILABLE", Message = "Price history contains a date gap within the required contiguous training window. No interpolation was applied." };
+            bars = bars.GetRange(contiguousStart, bars.Count - contiguousStart);
+            template = template with { Observations = bars.Count };
+        }
 
         // Hash only immutable model inputs up to the origin. Later candles and optional feeds cannot affect the forecast.
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(
             bars.Select(b => new { b.Date, b.BtcOpen, b.BtcHigh, b.BtcLow, b.BtcClose, b.BtcVolume })))));
         string cacheKey = $"{TrajectoryPolicy.Version}:{source}:{symbol}:{fingerprint}";
-        lock (_lock) if (_cache is { } c && c.Key == cacheKey) return c.Forecast;
+        if (TryGetCached(cacheKey, out var cached)) return cached;
         template = template with { DataFingerprint = fingerprint };
         var features = new FeatureCalculator().Calculate(bars);
         var samples = new List<Sample>();
@@ -106,15 +130,63 @@ public sealed class PriceTrajectoryService : IPriceTrajectoryService
             ServingFitOutcomeEnd = servingFit[^1].Date.AddDays(7), ServingCalibrationStart = servingCalibration[0].Date,
             Points = points.AsReadOnly(), Validation = validation.AsReadOnly()
         };
-        lock (_lock) _cache = (cacheKey, result);
+        StoreCached(cacheKey, result);
         return result;
+    }
+
+    private bool TryGetCached(string key, out TrajectoryForecast forecast)
+    {
+        lock (_lock)
+        {
+            if (_cacheIndex.TryGetValue(key, out var node))
+            {
+                _cacheOrder.Remove(node);
+                _cacheOrder.AddFirst(node);
+                forecast = node.Value.Forecast;
+                return true;
+            }
+        }
+        forecast = null!;
+        return false;
+    }
+
+    private void StoreCached(string key, TrajectoryForecast forecast)
+    {
+        lock (_lock)
+        {
+            if (_cacheIndex.TryGetValue(key, out var existing))
+            {
+                _cacheOrder.Remove(existing);
+                _cacheIndex.Remove(key);
+            }
+            var node = _cacheOrder.AddFirst((key, forecast));
+            _cacheIndex[key] = node;
+            while (_cacheIndex.Count > MaxCacheEntries && _cacheOrder.Last is { } oldest)
+            {
+                _cacheOrder.RemoveLast();
+                _cacheIndex.Remove(oldest.Value.Key);
+            }
+        }
     }
 
     private static Distribution Train(List<Sample> fit, List<Sample> calibration, int h)
     {
-        var model = RidgeRegressor.Fit(fit.Select(s => s.X).ToList(), fit.Select(s => s.LogReturns[h - 1] / Scale(s, h)).ToList());
-        var residuals = calibration.Select(s => s.LogReturns[h - 1] / Scale(s, h) - model.Predict(s.X)).Order().ToArray();
-        return new Distribution(model, Quantile(residuals, .1), Quantile(residuals, .5), Quantile(residuals, .9));
+        var inputs = fit.Select(s => s.X).ToList();
+        var targets = fit.Select(s => s.LogReturns[h - 1] / Scale(s, h)).ToList();
+
+        var lowerModel = QuantileRegressor.Fit(inputs, targets, TrajectoryPolicy.LowerQuantile, TrajectoryPolicy.TailSlopePenalty, TrajectoryPolicy.TailInterceptPenalty);
+        var medianModel = QuantileRegressor.Fit(inputs, targets, 0.50d, TrajectoryPolicy.MedianSlopePenalty, TrajectoryPolicy.MedianInterceptPenalty);
+        var upperModel = QuantileRegressor.Fit(inputs, targets, TrajectoryPolicy.UpperQuantile, TrajectoryPolicy.TailSlopePenalty, TrajectoryPolicy.TailInterceptPenalty);
+
+        var lowerResiduals = calibration.Select(s => s.LogReturns[h - 1] / Scale(s, h) - lowerModel.Predict(s.X)).Order().ToArray();
+        var upperResiduals = calibration.Select(s => s.LogReturns[h - 1] / Scale(s, h) - upperModel.Predict(s.X)).Order().ToArray();
+
+        return new Distribution(
+            lowerModel,
+            medianModel,
+            upperModel,
+            Quantile(lowerResiduals, TrajectoryPolicy.LowerQuantile),
+            Quantile(upperResiduals, TrajectoryPolicy.UpperQuantile));
     }
 
     private static HorizonValidation Evaluate(Distribution model, List<Sample> fit, List<Sample> calibration, List<Sample> test, int h)
