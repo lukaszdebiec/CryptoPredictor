@@ -11,6 +11,7 @@ public sealed record MarketChartResponse
     public FibLevelsSummary? Fibonacci { get; init; }
     public LiquiditySummary? Liquidity { get; init; }
     public PredictionSummary? Prediction { get; init; }
+    public CryptoPredictor.Prediction.Trajectory.TrajectoryForecast? Trajectory { get; init; }
 }
 
 public sealed record PredictionSummary

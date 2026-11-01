@@ -29,7 +29,10 @@ jobs:
         run: dotnet test Tests/CryptoPredictor.Tests.csproj --configuration Release
 
       - name: Test journal calculations
-        run: node --test Tests/journal-math.test.cjs
+        run: node --test Tests/*.test.cjs
+
+      - name: Build price trajectory research tool
+        run: dotnet build tools/Trajectory/Trajectory.csproj --configuration Release
 
   deploy:
     name: Deploy to GCP Always Free VM

@@ -271,7 +271,8 @@
             <div id="liquidity-badge-container" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
               <span id="badge-liq-magnet" class="liq-badge" style="display: none;">Liq Magnet: --</span>
               <span id="badge-forecast-target" class="target-badge" style="display: none;">Target: --</span>
-              <button id="btn-toggle-cone" class="cone-toggle-btn active" title="Illustrative volatility bands; these are not calibrated price forecasts">📐 7D Volatility Bands</button>
+              <button id="btn-toggle-cone" class="cone-toggle-btn active" title="Estimated daily closing-price medians and marginal 10–90% intervals">📐 Mediana 1–7D</button>
+              <button id="btn-sync-price-history" class="btn btn-secondary" title="Pobierz 5 lat dziennych świec z jednego rynku do modelu trajektorii">Historia BTC: 5 lat</button>
             </div>
           </div>
 
@@ -284,6 +285,8 @@
             <button id="btn-chart-expand" class="size-btn" title="Toggle Fullscreen / Expanded View">⛶</button>
           </div>
         </div>
+
+        <div id="trajectory-status" role="status" style="font-size: 0.78rem; padding: 0.5rem 1rem; color: var(--text-muted);">Sprawdzanie danych do modelu trajektorii...</div>
 
         <!-- Floating Price Legend -->
         <div id="chart-legend" class="chart-legend">
@@ -473,6 +476,7 @@
       </div>
 
       <!-- Time Machine Chart Canvas -->
+      <div id="tm-trajectory-status" role="status" style="font-size: 0.78rem; padding: 0.5rem 1rem; color: var(--text-muted);"></div>
       <div class="tm-chart-wrapper">
         <div id="time-machine-chart" class="time-machine-chart"></div>
 
@@ -878,6 +882,7 @@
   <!-- Scripts -->
   <script src="/js/lightweight-charts.standalone.production.js"></script>
   <script src="/js/journal-math.js?v=2.0"></script>
-  <script src="/js/app.js?v=2.0"></script>
+  <script src="/js/trajectory-view.js?v=2.1"></script>
+  <script src="/js/app.js?v=2.1"></script>
 </body>
 </html>
