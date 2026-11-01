@@ -4,6 +4,7 @@ using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
 using CryptoPredictor.Prediction;
+using CryptoPredictor.Prediction.Trajectory;
 
 namespace CryptoPredictor.Background;
 
@@ -117,6 +118,9 @@ public class DailyMarketDataWorker : BackgroundService
         var predictor = scope.ServiceProvider.GetRequiredService<IPredictorService>();
 
         int daysToSync = _configuration.GetValue("Worker:DaysToSync", 60);
+
+        // Once a backfill exists, keep the dedicated market's history fresh without mixing exchanges.
+        await scope.ServiceProvider.GetRequiredService<ITrajectoryProvider>().TryRefreshCachedHistoryAsync(ct);
 
         // 1. Fetch & aggregate latest market data
         _logger.LogInformation("[DailyMarketDataWorker] Fetching market data from all sources (Binance, Deribit, Coinbase, Farside ETF, F&G)...");

@@ -4,6 +4,7 @@ using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
 using CryptoPredictor.Prediction;
+using CryptoPredictor.Prediction.Trajectory;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CryptoPredictor.Controllers;
@@ -19,6 +20,7 @@ public class MarketDataController : ControllerBase
     private readonly ITurningPointDetector _turningPointDetector;
     private readonly ILiquidityEngine _liquidityEngine;
     private readonly IPredictorService _predictor;
+    private readonly ITrajectoryProvider _trajectory;
 
     private static IReadOnlyList<BinanceIntradayKline>? _cached4hKlines;
     private static DateTimeOffset _cache4hExpiry = DateTimeOffset.MinValue;
@@ -31,7 +33,7 @@ public class MarketDataController : ControllerBase
         IFeatureCalculator featureCalculator,
         ITurningPointDetector turningPointDetector,
         ILiquidityEngine liquidityEngine,
-        IPredictorService predictor)
+        IPredictorService predictor, ITrajectoryProvider trajectory)
     {
         _aggregator = aggregator;
         _binanceData = binanceData;
@@ -40,6 +42,7 @@ public class MarketDataController : ControllerBase
         _turningPointDetector = turningPointDetector;
         _liquidityEngine = liquidityEngine;
         _predictor = predictor;
+        _trajectory = trajectory;
     }
 
     /// <summary>
@@ -52,6 +55,7 @@ public class MarketDataController : ControllerBase
         if (days <= 0 || days > 1000)
             return BadRequest("Days must be between 1 and 1000.");
 
+        await _trajectory.TryRefreshCachedHistoryAsync(ct);
         var data = await _aggregator.FetchAndAggregateAsync(days, saveToStorage: true, ct);
         if (data.Count == 0)
             return StatusCode(500, "No market data could be fetched.");
@@ -338,7 +342,8 @@ public class MarketDataController : ControllerBase
             Summary = summary,
             Fibonacci = fibSummary,
             Liquidity = liqSummary,
-            Prediction = predSummary
+            Prediction = predSummary,
+            Trajectory = await _trajectory.GetAsync(latest.Date, ct)
         });
     }
 
@@ -697,7 +702,8 @@ public class MarketDataController : ControllerBase
             Summary = summary,
             Fibonacci = fibSummary,
             Liquidity = liqSummary,
-            Prediction = predSummary
+            Prediction = predSummary,
+            Trajectory = await _trajectory.GetAsync(ct: ct)
         });
     }
 }

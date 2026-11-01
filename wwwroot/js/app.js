@@ -304,9 +304,12 @@
       currentDays = days;
       currentTimeframe = timeframe;
       const url = `/api/marketdata/chart?days=${days}&timeframe=${timeframe}`;
-      const res = await fetch(url);
+      let res = await fetch(url);
+      if (!res.ok && timeframe === '1d') {
+        // The trajectory's dedicated price history remains usable when optional market feeds fail.
+        res = await fetch(`/api/prediction/trajectory/chart?days=${days}`);
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
       const data = await res.json();
       cachedChartData = data;
       renderChart(data, true);
@@ -538,6 +541,8 @@
         activeTargetLines = [];
       }
 
+      const previousTargetBadge = document.getElementById('badge-forecast-target');
+      if (previousTargetBadge) previousTargetBadge.style.display = 'none';
       if (data.prediction) {
         const pred = data.prediction;
         const isBearish = pred.signal === 'BEARISH_RISK';
@@ -571,35 +576,6 @@
             }));
           }
 
-          // 3. Render 7-Day Volatility Forecast Cone
-          if (predictionCenterSeries && predictionUpperSeries && predictionLowerSeries) {
-            if (pred.projectionCone && pred.projectionCone.length > 0) {
-              const coneColor = isBearish ? '#f43f5e' : (isBullish ? '#10b981' : '#38bdf8');
-              const bandColor = isBearish ? 'rgba(244, 63, 94, 0.4)' : (isBullish ? 'rgba(16, 185, 129, 0.4)' : 'rgba(56, 189, 248, 0.4)');
-
-              predictionCenterSeries.applyOptions({
-                visible: true,
-                color: coneColor,
-                title: isBearish ? '7D Bearish Trajectory' : (isBullish ? '7D Bullish Trajectory' : '7D Expected Trajectory')
-              });
-              predictionUpperSeries.applyOptions({ visible: true, color: bandColor });
-              predictionLowerSeries.applyOptions({ visible: true, color: bandColor });
-
-              predictionCenterSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.expectedPrice) })));
-              predictionUpperSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.upperBand) })));
-              predictionLowerSeries.setData(pred.projectionCone.map(p => ({ time: parseChartTime(p.time), value: Number(p.lowerBand) })));
-            }
-          }
-        } else {
-          // Hide forecast cone series and clear scale tags when toggled off
-          if (predictionCenterSeries && predictionUpperSeries && predictionLowerSeries) {
-            predictionCenterSeries.applyOptions({ visible: false });
-            predictionUpperSeries.applyOptions({ visible: false });
-            predictionLowerSeries.applyOptions({ visible: false });
-            predictionCenterSeries.setData([]);
-            predictionUpperSeries.setData([]);
-            predictionLowerSeries.setData([]);
-          }
         }
 
         // 4. Update Target Badge in Chart Header
@@ -614,6 +590,22 @@
             targetBadge.style.display = 'none';
           }
         }
+      }
+
+      // Draw model-derived daily quantiles independently of the directional trade signal.
+      const projection = TrajectoryView.series(data.trajectory, currentTimeframe, showForecastCone);
+      const status = document.getElementById('trajectory-status');
+      if (status) status.textContent = projection.message;
+      const color = projection.validated ? '#38bdf8' : '#f59e0b';
+      if (predictionCenterSeries && predictionUpperSeries && predictionLowerSeries) {
+        predictionCenterSeries.applyOptions({ visible: projection.hasPoints, color, title: projection.title,
+          lineStyle: projection.validated ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed });
+        predictionUpperSeries.applyOptions({ visible: projection.hasPoints, color, title: 'Q90 (dzień)', lineStyle: LightweightCharts.LineStyle.Dotted });
+        predictionLowerSeries.applyOptions({ visible: projection.hasPoints, color, title: 'Q10 (dzień)', lineStyle: LightweightCharts.LineStyle.Dotted });
+        // Always clear old curves when the next response has insufficient data or the overlay is hidden.
+        predictionCenterSeries.setData(projection.median);
+        predictionUpperSeries.setData(projection.upper);
+        predictionLowerSeries.setData(projection.lower);
       }
 
       // Update Subchart
@@ -1487,6 +1479,26 @@
       });
     }
 
+    const historyButton = document.getElementById('btn-sync-price-history');
+    if (historyButton) historyButton.addEventListener('click', async () => {
+      historyButton.disabled = true;
+      const status = document.getElementById('trajectory-status');
+      if (status) status.textContent = 'Pobieranie historii cen BTC z jednego rynku...';
+      try {
+        const result = await fetch('/api/prediction/trajectory/sync-history?days=1825', { method: 'POST' });
+        if (!result.ok) {
+          const error = await result.json().catch(() => ({}));
+          throw new Error(error.message || `HTTP ${result.status}`);
+        }
+        const metadata = await result.json();
+        showToast(`Zapisano ${metadata.count} dni historii; brakujących dat: ${metadata.missingDates.length}.`, 'info');
+        await loadChartData(currentDays, currentTimeframe);
+      } catch (error) {
+        if (status) status.textContent = 'Nie udało się pobrać historii: ' + error.message;
+        showToast(error.message, 'error');
+      } finally { historyButton.disabled = false; }
+    });
+
     // Toggle 7D Forecast Cone Button
     const btnToggleCone = document.getElementById('btn-toggle-cone');
     if (btnToggleCone) {
@@ -1765,7 +1777,7 @@
       lineWidth: 1,
       lineStyle: window.LightweightCharts.LineStyle.Dashed,
       priceLineVisible: false,
-      title: 'Upper Band (+1σ)'
+      title: 'Q90 (dzień)'
     });
 
     tmLowerConeSeries = tmChart.addSeries(window.LightweightCharts.LineSeries, {
@@ -1773,7 +1785,7 @@
       lineWidth: 1,
       lineStyle: window.LightweightCharts.LineStyle.Dashed,
       priceLineVisible: false,
-      title: 'Lower Band (-1σ)'
+      title: 'Q10 (dzień)'
     });
 
     tmExpectedLineSeries = tmChart.addSeries(window.LightweightCharts.LineSeries, {
@@ -1781,7 +1793,7 @@
       lineWidth: 2,
       lineStyle: window.LightweightCharts.LineStyle.Solid,
       priceLineVisible: false,
-      title: 'Expected Path'
+      title: 'Mediana modelu 1–7D'
     });
 
     // Responsive resize
@@ -1945,29 +1957,21 @@
 
       tmCandleSeries.setData(histData);
 
-      // Populate 7D Forecast Cone starting at date T
-      if (data.prediction && data.prediction.projectionCone && data.prediction.projectionCone.length > 0) {
-        const upper = data.prediction.projectionCone.map(p => ({
-          time: parseChartTime(p.time),
-          value: Number(p.upperBand)
-        }));
-        const lower = data.prediction.projectionCone.map(p => ({
-          time: parseChartTime(p.time),
-          value: Number(p.lowerBand)
-        }));
-        const exp = data.prediction.projectionCone.map(p => ({
-          time: parseChartTime(p.time),
-          value: Number(p.expectedPrice)
-        }));
-
-        tmUpperConeSeries.setData(upper);
-        tmLowerConeSeries.setData(lower);
-        tmExpectedLineSeries.setData(exp);
-      } else {
-        tmUpperConeSeries.setData([]);
-        tmLowerConeSeries.setData([]);
-        tmExpectedLineSeries.setData([]);
-      }
+      const projection = TrajectoryView.series(data.trajectory);
+      const trajectoryStatus = document.getElementById('tm-trajectory-status');
+      if (trajectoryStatus) trajectoryStatus.textContent = projection.message;
+      tmUpperConeSeries.setData(projection.upper);
+      tmLowerConeSeries.setData(projection.lower);
+      tmExpectedLineSeries.setData(projection.median);
+      const tmTrajColor = projection.validated ? '#38bdf8' : '#f59e0b';
+      tmUpperConeSeries.applyOptions({ visible: projection.hasPoints, color: tmTrajColor, title: 'Q90 (dzień)', lineStyle: window.LightweightCharts.LineStyle.Dotted });
+      tmLowerConeSeries.applyOptions({ visible: projection.hasPoints, color: tmTrajColor, title: 'Q10 (dzień)', lineStyle: window.LightweightCharts.LineStyle.Dotted });
+      tmExpectedLineSeries.applyOptions({
+        visible: projection.hasPoints,
+        title: projection.title,
+        color: tmTrajColor,
+        lineStyle: projection.validated ? window.LightweightCharts.LineStyle.Solid : window.LightweightCharts.LineStyle.Dashed
+      });
 
       // Draw TP and SL price lines
       const tp = Number(data.prediction.targetPrice);
