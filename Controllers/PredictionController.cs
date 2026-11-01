@@ -4,6 +4,7 @@ using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
 using CryptoPredictor.Prediction;
+using CryptoPredictor.Prediction.Confluence;
 using CryptoPredictor.Prediction.Trajectory;
 using Microsoft.AspNetCore.Mvc;
 
@@ -19,13 +20,27 @@ public class PredictionController : ControllerBase
     private readonly IMarketDataStorage _storage;
     private readonly IMarketDataAggregator _aggregator;
     private readonly ITrajectoryProvider _trajectory;
+    private readonly IConfluenceIndicatorService _confluence;
+    private readonly IPriceHistoryCache _priceHistoryCache;
 
-    public PredictionController(IPredictorService predictor, ITurningPointDetector turningPointDetector,
-        IFeatureCalculator featureCalculator, IMarketDataStorage storage, IMarketDataAggregator aggregator, ITrajectoryProvider trajectory)
+    public PredictionController(
+        IPredictorService predictor,
+        ITurningPointDetector turningPointDetector,
+        IFeatureCalculator featureCalculator,
+        IMarketDataStorage storage,
+        IMarketDataAggregator aggregator,
+        ITrajectoryProvider trajectory,
+        IConfluenceIndicatorService confluence,
+        IPriceHistoryCache priceHistoryCache)
     {
-        _predictor = predictor; _turningPointDetector = turningPointDetector;
-        _featureCalculator = featureCalculator; _storage = storage; _aggregator = aggregator;
+        _predictor = predictor;
+        _turningPointDetector = turningPointDetector;
+        _featureCalculator = featureCalculator;
+        _storage = storage;
+        _aggregator = aggregator;
         _trajectory = trajectory;
+        _confluence = confluence;
+        _priceHistoryCache = priceHistoryCache;
     }
 
     private async Task<IReadOnlyList<DailyMarketData>> History(int days, CancellationToken ct)
@@ -66,6 +81,30 @@ public class PredictionController : ControllerBase
         if (issued.ModelVersion != PredictionPolicy.Version)
             return Ok(prediction);
         return Ok(issued);
+    }
+
+    [HttpGet("confluence")]
+    public async Task<ActionResult<ConfluenceForecast>> GetConfluenceForecast(
+        [FromQuery] int horizonDays = 7,
+        [FromQuery] DateOnly? date = null,
+        CancellationToken ct = default)
+    {
+        if (horizonDays is < 1 or > 90)
+            return BadRequest("horizonDays must be between 1 and 90.");
+
+        var todayUtc = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (date.HasValue && date.Value >= todayUtc)
+            return BadRequest("Choose a completed UTC day.");
+
+        var data = await History(500, ct);
+        if (data.Count == 0)
+            return StatusCode(503, "No closed daily market observations are available.");
+
+        var history = date.HasValue ? data.Where(d => d.Date <= date.Value).ToList() : data;
+        var features = _featureCalculator.Calculate(history);
+        var longCandles = (await _priceHistoryCache.LoadAsync(ct))?.Candles;
+
+        return Ok(_confluence.Evaluate(history, features, horizonDays, date, longCandles));
     }
 
     [HttpGet("history")]
@@ -113,6 +152,8 @@ public class PredictionController : ControllerBase
         [FromQuery] bool strictlyOutOfSample = true, CancellationToken ct = default)
     {
         if (!strictlyOutOfSample) return BadRequest("In-sample historical predictions are not supported. Use strictlyOutOfSample=true.");
+        var todayUtc = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (date >= todayUtc) return BadRequest("Choose a completed UTC day.");
         var data = await History(365, ct);
         var history = data.Where(d => d.Date <= date).ToList();
         if (history.Count == 0 || history[^1].Date != date) return NotFound("No closed daily candle exists for that date.");
@@ -123,6 +164,8 @@ public class PredictionController : ControllerBase
         var prediction = predictor.Predict(features[^1], history[^1]);
         var outcome = PredictionOutcomeResolver.Resolve(prediction, data);
         var forward = data.Where(d => d.Date > date && d.Date <= date.AddDays(7)).ToList();
+        var longCandles = (await _priceHistoryCache.LoadAsync(ct))?.Candles;
+        var confluence7d = _confluence.Evaluate(history, features, 7, date, longCandles);
         object Candle(DailyMarketData d) => new { time = d.Date.ToString("yyyy-MM-dd"), open = d.BtcOpen, high = d.BtcHigh, low = d.BtcLow, close = d.BtcClose, volume = d.BtcVolume };
         decimal? ForwardReturn(int days) => data.FirstOrDefault(d => d.Date == date.AddDays(days)) is { } d ? d.BtcClose / history[^1].BtcClose - 1m : null;
         return Ok(new
@@ -131,6 +174,7 @@ public class PredictionController : ControllerBase
             TrainingSamplesUsed = predictor.LastTrainingMetrics?.TrainingSampleCount ?? 0,
             HistoricalCandles = history.TakeLast(60).Select(Candle), ForwardCandles = forward.Select(Candle), Prediction = prediction,
             Trajectory = await _trajectory.GetAsync(date, ct),
+            Confluence = confluence7d,
             Resolution = new
             {
                 outcome.OutcomeStatus, outcome.RealizedReturnPercent, outcome.ResolvedDate, outcome.ResolvedPrice,

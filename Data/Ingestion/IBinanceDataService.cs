@@ -11,6 +11,6 @@ public interface IBinanceDataService
 {
     Task<IReadOnlyList<BinanceKline>> GetDailyKlinesAsync(string symbol = "BTCUSDT", int limit = 500, CancellationToken ct = default);
     Task<IReadOnlyList<BinanceIntradayKline>> GetIntradayKlinesAsync(string symbol = "BTCUSDT", string interval = "4h", int limit = 500, CancellationToken ct = default);
-    Task<IReadOnlyDictionary<DateOnly, decimal>> GetDailyFundingRatesAsync(string symbol = "BTCUSDT", int limit = 1000, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<DateOnly, decimal>> GetDailyFundingRatesAsync(string symbol = "BTCUSDT", int days = 365, CancellationToken ct = default);
     Task<IReadOnlyDictionary<DateOnly, decimal>> GetDailyOpenInterestAsync(string symbol = "BTCUSDT", int limit = 500, CancellationToken ct = default);
 }

@@ -6,6 +6,7 @@ using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
 using CryptoPredictor.Features.Intraday;
 using CryptoPredictor.Prediction;
+using CryptoPredictor.Prediction.Confluence;
 using CryptoPredictor.Prediction.Intraday;
 using CryptoPredictor.Prediction.Trajectory;
 using Microsoft.EntityFrameworkCore;
@@ -53,6 +54,7 @@ builder.Services.AddSingleton<IPriceHistoryCache, PriceHistoryCache>();
 builder.Services.AddSingleton<IPriceTrajectoryService, PriceTrajectoryService>();
 builder.Services.AddSingleton<ITrajectorySnapshotStore, TrajectorySnapshotStore>();
 builder.Services.AddSingleton<ITrajectoryProvider, TrajectoryProvider>();
+builder.Services.AddSingleton<IConfluenceIndicatorService, ConfluenceIndicatorService>();
 
 // Background Worker for automated daily 00:05 UTC cycle
 builder.Services.AddHostedService<CryptoPredictor.Background.DailyMarketDataWorker>();
@@ -89,4 +91,3 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
-

@@ -4,6 +4,7 @@ using CryptoPredictor.Data.Ingestion;
 using CryptoPredictor.Data.Storage;
 using CryptoPredictor.Features;
 using CryptoPredictor.Prediction;
+using CryptoPredictor.Prediction.Confluence;
 using CryptoPredictor.Prediction.Trajectory;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,6 +22,8 @@ public class MarketDataController : ControllerBase
     private readonly ILiquidityEngine _liquidityEngine;
     private readonly IPredictorService _predictor;
     private readonly ITrajectoryProvider _trajectory;
+    private readonly IConfluenceIndicatorService _confluence;
+    private readonly IPriceHistoryCache _priceHistoryCache;
 
     private static IReadOnlyList<BinanceIntradayKline>? _cached4hKlines;
     private static DateTimeOffset _cache4hExpiry = DateTimeOffset.MinValue;
@@ -33,7 +36,10 @@ public class MarketDataController : ControllerBase
         IFeatureCalculator featureCalculator,
         ITurningPointDetector turningPointDetector,
         ILiquidityEngine liquidityEngine,
-        IPredictorService predictor, ITrajectoryProvider trajectory)
+        IPredictorService predictor,
+        ITrajectoryProvider trajectory,
+        IConfluenceIndicatorService confluence,
+        IPriceHistoryCache priceHistoryCache)
     {
         _aggregator = aggregator;
         _binanceData = binanceData;
@@ -43,6 +49,8 @@ public class MarketDataController : ControllerBase
         _liquidityEngine = liquidityEngine;
         _predictor = predictor;
         _trajectory = trajectory;
+        _confluence = confluence;
+        _priceHistoryCache = priceHistoryCache;
     }
 
     /// <summary>
@@ -97,7 +105,6 @@ public class MarketDataController : ControllerBase
         }
 
         return Ok(data);
-
     }
 
     /// <summary>
@@ -221,15 +228,17 @@ public class MarketDataController : ControllerBase
             {
                 Time = dateStr,
                 FundingZScore30d = feat?.FundingZScore30d,
+                CoinbasePremiumZScore30d = feat?.CoinbasePremiumZScore30d,
                 EtfFlow7dUsd = feat?.EtfFlow7d,
                 EtfFlowDailyUsd = day.BitcoinEtfNetFlowUsd,
                 EtfFlowZScore30d = feat?.EtfFlowZScore30d,
                 OiZScore30d = feat?.OiZScore30d,
                 DvolZScore30d = feat?.DvolZScore30d,
-                FearGreedIndex = day.FearGreedIndex,
+                FearGreedIndex = day.FearGreedIndex > 0 ? day.FearGreedIndex : null,
                 FibRetracementRatio30d = feat?.FibRetracementRatio30d,
                 DistToGoldenPocket30d = feat?.DistToGoldenPocket30d,
                 KaufmanEfficiencyRatio10d = feat?.KaufmanEfficiencyRatio10d,
+                SignedKaufmanEfficiencyRatio10d = feat?.SignedKaufmanEfficiencyRatio10d,
                 WeeklyTrendBias = feat?.WeeklyTrendBias,
                 Dxy = day.Dxy > 0m ? day.Dxy : null,
                 DxyZScore30d = feat?.DxyZScore30d,
@@ -268,6 +277,7 @@ public class MarketDataController : ControllerBase
             {
                 featureMap.TryGetValue(latest.Date, out var latestFeat);
                 var ker = latestFeat?.KaufmanEfficiencyRatio10d ?? 0m;
+                var signedKer = latestFeat?.SignedKaufmanEfficiencyRatio10d ?? 0m;
                 var currentRatio = (swingHigh - latest.BtcClose) / range;
                 var inGoldenPocket = currentRatio >= 0.60m && currentRatio <= 0.66m;
                 var waveRegime = ker > 0.55m ? "Directional movement" : (ker < 0.25m ? "Low directional efficiency" : "Consolidation / Transitory");
@@ -287,6 +297,7 @@ public class MarketDataController : ControllerBase
                     CurrentRatio = Math.Round(currentRatio, 4),
                     InGoldenPocket = inGoldenPocket,
                     KaufmanEfficiencyRatio = Math.Round(ker, 4),
+                    SignedKaufmanEfficiencyRatio = Math.Round(signedKer, 4),
                     WaveRegime = waveRegime
                 };
             }
@@ -334,6 +345,12 @@ public class MarketDataController : ControllerBase
             };
         }
 
+        var todayUtc = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly? closedAsOf = latest.Date < todayUtc ? latest.Date : null;
+        var longCandles = (await _priceHistoryCache.LoadAsync(ct))?.Candles;
+        var confluence7d = _confluence.Evaluate(sortedData, features, 7, closedAsOf, longCandles);
+        var confluence30d = _confluence.Evaluate(sortedData, features, 30, closedAsOf, longCandles);
+
         return Ok(new MarketChartResponse
         {
             Candles = candles,
@@ -343,7 +360,9 @@ public class MarketDataController : ControllerBase
             Fibonacci = fibSummary,
             Liquidity = liqSummary,
             Prediction = predSummary,
-            Trajectory = await _trajectory.GetAsync(latest.Date, ct)
+            Trajectory = await _trajectory.GetAsync(closedAsOf, ct),
+            Confluence7d = confluence7d,
+            Confluence30d = confluence30d
         });
     }
 
@@ -470,15 +489,17 @@ public class MarketDataController : ControllerBase
 
             // Kaufman Efficiency Ratio for this 4H bar (10 periods = 40 hours)
             decimal barKer = 0m;
+            decimal signedBarKer = 0m;
             if (i >= 10)
             {
-                decimal netChange = Math.Abs(k.Close - dataSubset[i - 10].Close);
+                decimal signedChange = k.Close - dataSubset[i - 10].Close;
                 decimal path = 0m;
                 for (int p = i - 9; p <= i; p++)
                 {
                     path += Math.Abs(dataSubset[p].Close - dataSubset[p - 1].Close);
                 }
-                barKer = path > 0 ? netChange / path : 0m;
+                signedBarKer = path > 0 ? Math.Clamp(signedChange / path, -1m, 1m) : 0m;
+                barKer = Math.Abs(signedBarKer);
             }
 
             // Map corresponding daily feature data
@@ -496,15 +517,17 @@ public class MarketDataController : ControllerBase
             {
                 Time = timeStr,
                 FundingZScore30d = feat?.FundingZScore30d,
+                CoinbasePremiumZScore30d = feat?.CoinbasePremiumZScore30d,
                 EtfFlow7dUsd = feat?.EtfFlow7d,
                 EtfFlowDailyUsd = dayMarket?.BitcoinEtfNetFlowUsd,
                 EtfFlowZScore30d = feat?.EtfFlowZScore30d,
                 OiZScore30d = feat?.OiZScore30d,
                 DvolZScore30d = feat?.DvolZScore30d,
-                FearGreedIndex = dayMarket?.FearGreedIndex,
+                FearGreedIndex = dayMarket?.FearGreedIndex > 0 ? dayMarket.FearGreedIndex : null,
                 FibRetracementRatio30d = feat?.FibRetracementRatio30d,
                 DistToGoldenPocket30d = feat?.DistToGoldenPocket30d,
                 KaufmanEfficiencyRatio10d = Math.Round(barKer, 4),
+                SignedKaufmanEfficiencyRatio10d = Math.Round(signedBarKer, 4),
                 WeeklyTrendBias = feat?.WeeklyTrendBias,
                 Dxy = dayMarket?.Dxy > 0 ? dayMarket.Dxy : null,
                 DxyZScore30d = feat?.DxyZScore30d,
@@ -543,15 +566,17 @@ public class MarketDataController : ControllerBase
 
             // Current 4H KER
             decimal latestKer = 0m;
+            decimal latestSignedKer = 0m;
             if (dataSubset.Count >= 10)
             {
-                decimal netChange = Math.Abs(latest.Close - dataSubset[^10].Close);
+                decimal signedChange = latest.Close - dataSubset[^10].Close;
                 decimal path = 0m;
                 for (int p = dataSubset.Count - 9; p < dataSubset.Count; p++)
                 {
                     path += Math.Abs(dataSubset[p].Close - dataSubset[p - 1].Close);
                 }
-                latestKer = path > 0 ? netChange / path : 0m;
+                latestSignedKer = path > 0 ? Math.Clamp(signedChange / path, -1m, 1m) : 0m;
+                latestKer = Math.Abs(latestSignedKer);
             }
 
             var waveRegime = latestKer > 0.55m ? "Directional movement" : (latestKer < 0.25m ? "Low directional efficiency" : "Consolidation / Transitory");
@@ -571,6 +596,7 @@ public class MarketDataController : ControllerBase
                 CurrentRatio = Math.Round(currentRatio, 4),
                 InGoldenPocket = inGoldenPocket,
                 KaufmanEfficiencyRatio = Math.Round(latestKer, 4),
+                SignedKaufmanEfficiencyRatio = Math.Round(latestSignedKer, 4),
                 WaveRegime = waveRegime
             };
         }
@@ -694,6 +720,14 @@ public class MarketDataController : ControllerBase
             };
         }
 
+        var longCandles4h = (await _priceHistoryCache.LoadAsync(ct))?.Candles;
+        ConfluenceForecast? confluence7d = dailyData.Count > 0
+            ? _confluence.Evaluate(dailyData, dailyFeatures, 7, null, longCandles4h)
+            : null;
+        ConfluenceForecast? confluence30d = dailyData.Count > 0
+            ? _confluence.Evaluate(dailyData, dailyFeatures, 30, null, longCandles4h)
+            : null;
+
         return Ok(new MarketChartResponse
         {
             Candles = candles,
@@ -703,8 +737,9 @@ public class MarketDataController : ControllerBase
             Fibonacci = fibSummary,
             Liquidity = liqSummary,
             Prediction = predSummary,
-            Trajectory = await _trajectory.GetAsync(ct: ct)
+            Trajectory = await _trajectory.GetAsync(ct: ct),
+            Confluence7d = confluence7d,
+            Confluence30d = confluence30d
         });
     }
 }
-

@@ -161,7 +161,7 @@ public class SqliteMarketDataStorage : IMarketDataStorage
         {
             if (existingMap.TryGetValue(item.Date, out var existingItem))
             {
-                db.Entry(existingItem).CurrentValues.SetValues(item);
+                db.Entry(existingItem).CurrentValues.SetValues(MergePreservingHistoricalFeeds(existingItem, item));
             }
             else
             {
@@ -172,6 +172,25 @@ public class SqliteMarketDataStorage : IMarketDataStorage
         await db.SaveChangesAsync(ct);
         _logger.LogInformation("Persisted {Count} market data records to SQLite (market_data.db).", data.Count);
     }
+
+    /// <summary>
+    /// Preserves already-recorded external feed observations when a subsequent sync uses an upstream API
+    /// with a shorter lookback window (e.g. 30-day Open Interest) or suffers a transient feed outage.
+    /// </summary>
+    private static DailyMarketData MergePreservingHistoricalFeeds(DailyMarketData existing, DailyMarketData incoming) =>
+        incoming with
+        {
+            FuturesOpenInterestUsd = incoming.FuturesOpenInterestUsd != 0m ? incoming.FuturesOpenInterestUsd : existing.FuturesOpenInterestUsd,
+            FundingRate = incoming.FundingRate != 0m ? incoming.FundingRate : existing.FundingRate,
+            CoinbasePremium = incoming.CoinbasePremium != 0m ? incoming.CoinbasePremium : existing.CoinbasePremium,
+            BtcDvol = incoming.BtcDvol != 0m ? incoming.BtcDvol : existing.BtcDvol,
+            FearGreedIndex = incoming.FearGreedIndex != 0 ? incoming.FearGreedIndex : existing.FearGreedIndex,
+            BitcoinEtfNetFlowUsd = incoming.BitcoinEtfNetFlowUsd != 0m ? incoming.BitcoinEtfNetFlowUsd : existing.BitcoinEtfNetFlowUsd,
+            Dxy = incoming.Dxy != 0m ? incoming.Dxy : existing.Dxy,
+            Us10YearYield = incoming.Us10YearYield != 0m ? incoming.Us10YearYield : existing.Us10YearYield,
+            Sp500Close = incoming.Sp500Close != 0m ? incoming.Sp500Close : existing.Sp500Close,
+            NasdaqClose = incoming.NasdaqClose != 0m ? incoming.NasdaqClose : existing.NasdaqClose
+        };
 
     public async Task<IReadOnlyList<DailyMarketData>> LoadAsync(CancellationToken ct = default)
     {
@@ -280,8 +299,9 @@ public class SqliteMarketDataStorage : IMarketDataStorage
         await using var db = await _contextFactory.CreateDbContextAsync(ct);
         var records = await db.Predictions.AsNoTracking().OrderByDescending(p => p.Date).ToListAsync(ct);
         // Legacy forecasts have different label/execution semantics. Preserve them in /history,
-        // but do not silently combine their performance with direction-v1.
-        var predictions = records.Select(MapToPrediction).Where(p => p.ModelVersion == PredictionPolicy.Version)
+        // but do not silently combine their performance with direction-v1*.
+        var predictions = records.Select(MapToPrediction)
+            .Where(p => p.ModelVersion.StartsWith("direction-v1", StringComparison.Ordinal))
             .Take(Math.Clamp(limit, 1, 1000)).ToList();
         var candles = await LoadAsync(ct);
         return PredictionOutcomeResolver.Journal(predictions.Select(p => PredictionOutcomeResolver.Resolve(p, candles)), "live");
@@ -343,4 +363,3 @@ public class SqliteMarketDataStorage : IMarketDataStorage
         };
     }
 }
-

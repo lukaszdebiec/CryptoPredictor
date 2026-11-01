@@ -133,7 +133,7 @@ public class TrajectoryModelTests
         // Inject a severe fat-tailed crash and recovery inside the historical fit window.
         bars[250] = bars[250] with { BtcClose = bars[250].BtcClose * 0.55m, BtcLow = bars[250].BtcClose * 0.50m };
         var result = new PriceTrajectoryService().Forecast(bars, "UserFile", "BTCUSDT");
-        Assert.Equal("trajectory-v2.1", result.ModelVersion);
+        Assert.Equal("trajectory-v2.2", result.ModelVersion);
         Assert.Equal(8, result.Points.Count);
         Assert.All(result.Points, p => Assert.True(p.LowerPrice > 0m && p.LowerPrice <= p.MedianPrice && p.MedianPrice <= p.UpperPrice));
     }

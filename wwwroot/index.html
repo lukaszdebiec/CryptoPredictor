@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CryptoPredictor | Quantitative AI Alpha Terminal</title>
   <meta name="description" content="Advanced quantitative Bitcoin prediction terminal powered by ML.NET, derivatives microstructure, and Spot ETF intelligence.">
-  <link rel="stylesheet" href="/css/style.css?v=1.4">
+  <link rel="stylesheet" href="/css/style.css?v=1.5">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22><text y=%2226%22 font-size=%2228%22>⚡</text></svg>">
 </head>
 <body>
@@ -271,7 +271,12 @@
             <div id="liquidity-badge-container" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
               <span id="badge-liq-magnet" class="liq-badge" style="display: none;">Liq Magnet: --</span>
               <span id="badge-forecast-target" class="target-badge" style="display: none;">Target: --</span>
-              <button id="btn-toggle-cone" class="cone-toggle-btn active" title="Estimated daily closing-price medians and marginal 10–90% intervals">📐 Mediana 1–7D</button>
+              <div class="projection-mode-switch" id="projection-mode-selector" role="group" aria-label="Tryb projekcji na wykresie">
+                <button class="proj-mode-btn active" data-proj-mode="confluence7d" title="Agregat 4 filarów konfluencji na 7 dni">🧭 Konfluencja 7D</button>
+                <button class="proj-mode-btn" data-proj-mode="confluence30d" title="Agregat 4 filarów na 30 dni + ścieżka analogu 4-letniego cyklu / Midterms">🗓️ 30D + Cykl</button>
+                <button class="proj-mode-btn" data-proj-mode="median7d" title="Czysta mediana regresyjna OHLCV 1–7D">📐 Mediana OHLCV</button>
+              </div>
+              <button id="btn-toggle-cone" class="cone-toggle-btn active" title="Pokaż lub ukryj krzywą projekcji i pasma zmienności na wykresie">👁️ Projekcja</button>
               <button id="btn-sync-price-history" class="btn btn-secondary" title="Pobierz 5 lat dziennych świec z jednego rynku do modelu trajektorii">Historia BTC: 5 lat</button>
             </div>
           </div>
@@ -325,6 +330,31 @@
         <div class="chart-resizer" id="resizer-sub" title="Drag vertically to resize Indicators Subchart (Double-click to reset)">
           <div class="resizer-handle"></div>
         </div>
+      </div>
+    </section>
+
+    <!-- 4-Pillar Confluence Projection Breakdown -->
+    <section class="confluence-section" aria-label="Agregat Konfluencji Ceny">
+      <div class="card confluence-card" id="confluence-panel">
+        <div class="confluence-header">
+          <div class="confluence-title-wrap">
+            <div class="panel-heading" style="margin-bottom: 0;">
+              <span>🧭 Agregat Konfluencji Ceny (<span id="conf-horizon-label">7D</span>)</span>
+            </div>
+            <span id="conf-asof-label" class="confluence-submeta">Oczekiwanie na dane zamknięcia UTC...</span>
+          </div>
+          <div class="confluence-summary-badges">
+            <span id="conf-score-badge" class="conf-score-pill neutral">0.0 / 100</span>
+            <span id="conf-bias-badge" class="conf-bias-pill neutral">ŁADOWANIE...</span>
+            <span id="conf-target-badge" class="conf-target-pill">--</span>
+          </div>
+        </div>
+
+        <div id="conf-pillars-grid" class="confluence-pillars-grid">
+          <div class="conf-pillar-empty">Ładowanie filarów konfluencji (Spot/ETF, Pozycjonowanie, Struktura Fibo/KER, Makro)...</div>
+        </div>
+
+        <div id="conf-cycle-box" class="confluence-cycle-box" style="display: none;"></div>
       </div>
     </section>
 
@@ -883,6 +913,7 @@
   <script src="/js/lightweight-charts.standalone.production.js"></script>
   <script src="/js/journal-math.js?v=2.0"></script>
   <script src="/js/trajectory-view.js?v=2.1"></script>
-  <script src="/js/app.js?v=2.2"></script>
+  <script src="/js/confluence-view.js?v=1.0"></script>
+  <script src="/js/app.js?v=2.3"></script>
 </body>
 </html>
